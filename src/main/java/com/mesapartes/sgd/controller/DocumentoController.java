@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -26,31 +27,38 @@ public class DocumentoController {
     private final DocumentoService documentoService;
 
     // ===== REGISTRAR DOCUMENTO =====
+    // POST /api/documentos
+    // Recibe: datos (JSON), archivo (PDF principal), anexo (PDF opcional)
     @PostMapping(consumes = "multipart/form-data")
     public ResponseEntity<DocumentoResponseDTO> registrar(
             @RequestPart("datos") @Valid DocumentoRequestDTO request,
-            @RequestPart(value = "archivo", required = false) MultipartFile archivo
+            @RequestPart(value = "archivo", required = false) MultipartFile archivo,
+            @RequestPart(value = "anexo", required = false) MultipartFile anexo
     ) throws IOException {
-        DocumentoResponseDTO response = documentoService.registrarDocumento(request, archivo);
+        DocumentoResponseDTO response = documentoService.registrarDocumento(
+                request, archivo, anexo);
         return ResponseEntity.ok(response);
     }
 
     // ===== CONSULTAR POR NÚMERO DE TRÁMITE =====
+    // GET /api/documentos/{numeroTramite}
     @GetMapping("/{numeroTramite}")
     public ResponseEntity<DocumentoResponseDTO> consultarPorNumeroTramite(
             @PathVariable String numeroTramite
     ) {
-        DocumentoResponseDTO response = documentoService.consultarPorNumeroTramite(numeroTramite);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(
+                documentoService.consultarPorNumeroTramite(numeroTramite));
     }
 
     // ===== LISTAR TODOS =====
+    // GET /api/documentos
     @GetMapping
     public ResponseEntity<List<DocumentoResponseDTO>> listarTodos() {
         return ResponseEntity.ok(documentoService.listarTodos());
     }
 
     // ===== LISTAR POR ESTADO =====
+    // GET /api/documentos/estado/{estado}
     @GetMapping("/estado/{estado}")
     public ResponseEntity<List<DocumentoResponseDTO>> listarPorEstado(
             @PathVariable EstadoDocumento estado
@@ -59,18 +67,18 @@ public class DocumentoController {
     }
 
     // ===== CAMBIAR ESTADO =====
+    // PATCH /api/documentos/{numeroTramite}/estado
     @PatchMapping("/{numeroTramite}/estado")
     public ResponseEntity<DocumentoResponseDTO> cambiarEstado(
             @PathVariable String numeroTramite,
             @RequestBody @Valid CambioEstadoDTO cambioEstadoDTO
     ) {
-        DocumentoResponseDTO response = documentoService.cambiarEstado(numeroTramite, cambioEstadoDTO);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(
+                documentoService.cambiarEstado(numeroTramite, cambioEstadoDTO));
     }
 
-    // ===== DESCARGAR EL ARCHIVO =====
-
-    // ===== DESCARGAR ARCHIVO =====
+    // ===== DESCARGAR ARCHIVO PRINCIPAL =====
+    // GET /api/documentos/{numeroTramite}/descargar
     @GetMapping("/{numeroTramite}/descargar")
     public ResponseEntity<Resource> descargarArchivo(
             @PathVariable String numeroTramite
@@ -82,7 +90,21 @@ public class DocumentoController {
                 .body(resource);
     }
 
+    // ===== DESCARGAR ANEXO =====
+    // GET /api/documentos/{numeroTramite}/descargar-anexo
+    @GetMapping("/{numeroTramite}/descargar-anexo")
+    public ResponseEntity<Resource> descargarAnexo(
+            @PathVariable String numeroTramite
+    ) {
+        Resource resource = documentoService.descargarAnexo(numeroTramite);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + resource.getFilename() + "\"")
+                .body(resource);
+    }
+
     // ===== BUSCAR POR FILTROS =====
+    // POST /api/documentos/buscar
     @PostMapping("/buscar")
     public ResponseEntity<List<DocumentoResponseDTO>> buscarPorFiltros(
             @RequestBody DocumentoFiltroDTO filtro
@@ -91,6 +113,7 @@ public class DocumentoController {
     }
 
     // ===== ASIGNAR ÁREA =====
+    // PATCH /api/documentos/{numeroTramite}/area/{areaId}
     @PatchMapping("/{numeroTramite}/area/{areaId}")
     public ResponseEntity<DocumentoResponseDTO> asignarArea(
             @PathVariable String numeroTramite,
@@ -98,5 +121,18 @@ public class DocumentoController {
     ) {
         return ResponseEntity.ok(documentoService.asignarArea(numeroTramite, areaId));
     }
-}
 
+    // ===== GENERAR CARGO EN PDF =====
+    // GET /api/documentos/{numeroTramite}/cargo
+    @GetMapping("/{numeroTramite}/cargo")
+    public ResponseEntity<byte[]> generarCargo(
+            @PathVariable String numeroTramite
+    ) {
+        byte[] pdf = documentoService.generarCargoPdf(numeroTramite);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"cargo-" + numeroTramite + ".html\"")
+                .body(pdf);
+    }
+}

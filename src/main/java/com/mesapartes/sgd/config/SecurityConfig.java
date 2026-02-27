@@ -33,10 +33,15 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(auth -> auth
+                        // Endpoints públicos (no requieren token)
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/documentos").permitAll()
                         .requestMatchers("/api/documentos/**").permitAll()
+                        // Gestión de cuenta requiere autenticación
+                        .requestMatchers("/api/cuenta/**").authenticated()
+                        // Solo ADMINISTRADOR
                         .requestMatchers("/api/usuarios/**").hasRole("ADMINISTRADOR")
+                        // Cualquier otro requiere autenticación
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
@@ -51,9 +56,11 @@ public class SecurityConfig {
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
+        return source -> {
+            UrlBasedCorsConfigurationSource urlSource = new UrlBasedCorsConfigurationSource();
+            urlSource.registerCorsConfiguration("/**", configuration);
+            return urlSource.getCorsConfiguration(source);
+        };
     }
 
     @Bean
