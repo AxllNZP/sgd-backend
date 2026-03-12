@@ -14,6 +14,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -38,7 +39,9 @@ public class DocumentoController {
             @RequestPart(value = "archivo", required = false) MultipartFile archivo,
             @RequestPart(value = "anexo", required = false) MultipartFile anexo
     ) throws IOException {
-        return ResponseEntity.ok(documentoService.registrarDocumento(request, archivo, anexo));
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(documentoService.registrarDocumento(request, archivo, anexo));
     }
 
     // CONSULTAR POR NÚMERO DE TRÁMITE → público

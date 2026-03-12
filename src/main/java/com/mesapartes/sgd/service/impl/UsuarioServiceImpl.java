@@ -3,6 +3,8 @@ package com.mesapartes.sgd.service.impl;
 import com.mesapartes.sgd.dto.UsuarioRequestDTO;
 import com.mesapartes.sgd.dto.UsuarioResponseDTO;
 import com.mesapartes.sgd.entity.Usuario;
+import com.mesapartes.sgd.exception.BusinessConflictException;
+import com.mesapartes.sgd.exception.ResourceNotFoundException;
 import com.mesapartes.sgd.repository.UsuarioRepository;
 import com.mesapartes.sgd.service.UsuarioService;
 import lombok.RequiredArgsConstructor;
@@ -94,7 +96,7 @@ public class UsuarioServiceImpl implements UsuarioService {
     private Usuario obtenerUsuarioPorId(UUID id) {
         return usuarioRepository.findById(id)
                 .orElseThrow(() ->
-                        new RuntimeException("Usuario no encontrado con id: " + id));
+                        new ResourceNotFoundException("Usuario no encontrado con id: " + id));
     }
 
     /**
@@ -102,7 +104,7 @@ public class UsuarioServiceImpl implements UsuarioService {
      */
     private void validarEmailUnico(String email) {
         if (usuarioRepository.existsByEmail(email)) {
-            throw new RuntimeException("Ya existe un usuario con el email: " + email);
+            throw new BusinessConflictException("Ya existe un usuario con el email: " + email);
         }
     }
 

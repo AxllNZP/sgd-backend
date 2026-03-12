@@ -5,6 +5,7 @@ import com.mesapartes.sgd.dto.UsuarioResponseDTO;
 import com.mesapartes.sgd.service.UsuarioService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -25,7 +26,9 @@ public class UsuarioController {
     public ResponseEntity<UsuarioResponseDTO> crearUsuario(
             @RequestBody @Valid UsuarioRequestDTO request
     ) {
-        return ResponseEntity.ok(usuarioService.crearUsuario(request));
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(usuarioService.crearUsuario(request));
     }
 
     // ===== OBTENER POR ID =====

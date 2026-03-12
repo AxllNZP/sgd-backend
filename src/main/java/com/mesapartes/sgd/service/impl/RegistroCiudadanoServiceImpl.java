@@ -5,6 +5,9 @@ import com.mesapartes.sgd.entity.ContactoNotificacion;
 import com.mesapartes.sgd.entity.PersonaJuridica;
 import com.mesapartes.sgd.entity.PersonaNatural;
 import com.mesapartes.sgd.entity.RolUsuario;
+import com.mesapartes.sgd.exception.BusinessConflictException;
+import com.mesapartes.sgd.exception.InvalidCredentialsException;
+import com.mesapartes.sgd.exception.ResourceNotFoundException;
 import com.mesapartes.sgd.repository.PersonaJuridicaRepository;
 import com.mesapartes.sgd.repository.PersonaNaturalRepository;
 import com.mesapartes.sgd.service.EmailService;
@@ -273,30 +276,30 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
 
     private void validarDocumentoUnico(String documento) {
         if (naturalRepo.existsByNumeroDocumento(documento)) {
-            throw new RuntimeException("Ya existe una cuenta con el documento: " + documento);
+            throw new BusinessConflictException("Ya existe una cuenta con el documento: " + documento);
         }
     }
 
     private void validarEmailUnico(String email) {
         if (naturalRepo.existsByEmail(email)) {
-            throw new RuntimeException("Ya existe una cuenta con el email: " + email);
+            throw new BusinessConflictException("Ya existe una cuenta con el email: " + email);
         }
     }
 
     private void validarRucUnico(String ruc) {
         if (juridicaRepo.existsByRuc(ruc)) {
-            throw new RuntimeException("Ya existe una cuenta con el RUC: " + ruc);
+            throw new BusinessConflictException("Ya existe una cuenta con el RUC: " + ruc);
         }
     }
 
     private PersonaNatural obtenerPersonaNatural(String documento) {
         return naturalRepo.findByNumeroDocumento(documento)
-                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+                .orElseThrow(() -> new ResourceNotFoundException("Cuenta no encontrada"));
     }
 
     private PersonaJuridica obtenerPersonaJuridica(String ruc) {
         return juridicaRepo.findByRuc(ruc)
-                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+                .orElseThrow(() -> new ResourceNotFoundException("Cuenta no encontrada"));
     }
 
     private void validarNoVerificado(boolean verificado) {
@@ -316,7 +319,7 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
         }
 
         if (!passwordEncoder.matches(passwordIngresado, passwordGuardado)) {
-            throw new RuntimeException("Credenciales incorrectas");
+            throw new InvalidCredentialsException("Credenciales incorrectas");
         }
     }
 

@@ -22,6 +22,7 @@ public class GestionCuentaController {
 
     // GET /api/cuenta/natural/{numeroDocumento}
     @GetMapping("/natural/{numeroDocumento}")
+    @PreAuthorize("#numeroDocumento == authentication.name or hasRole('ADMINISTRADOR')")
     public ResponseEntity<PerfilNaturalResponseDTO> obtenerPerfilNatural(
             @PathVariable String numeroDocumento
     ) {
@@ -44,6 +45,7 @@ public class GestionCuentaController {
 
     // GET /api/cuenta/juridica/{ruc}
     @GetMapping("/juridica/{ruc}")
+    @PreAuthorize("@jwtOwnerChecker.isOwnerJuridica(#ruc, authentication) or hasRole('ADMINISTRADOR')")
     public ResponseEntity<PerfilJuridicaResponseDTO> obtenerPerfilJuridica(
             @PathVariable String ruc
     ) {
@@ -53,6 +55,7 @@ public class GestionCuentaController {
 
     // PUT /api/cuenta/juridica/{ruc}
     @PutMapping("/juridica/{ruc}")
+    @PreAuthorize("@jwtOwnerChecker.isOwnerJuridica(#ruc, authentication) or hasRole('ADMINISTRADOR')")
     public ResponseEntity<PerfilJuridicaResponseDTO> editarJuridica(
             @PathVariable String ruc,
             @RequestBody @Valid EditarJuridicaRequestDTO request
@@ -65,6 +68,7 @@ public class GestionCuentaController {
 
     // GET /api/cuenta/juridica/{ruc}/contactos
     @GetMapping("/juridica/{ruc}/contactos")
+    @PreAuthorize("@jwtOwnerChecker.isOwnerJuridica(#ruc, authentication) or hasRole('ADMINISTRADOR')")
     public ResponseEntity<List<ContactoNotificacionResponseDTO>> listarContactos(
             @PathVariable String ruc
     ) {
