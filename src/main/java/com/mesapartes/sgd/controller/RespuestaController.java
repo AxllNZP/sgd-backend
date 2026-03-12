@@ -6,6 +6,7 @@ import com.mesapartes.sgd.service.RespuestaService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,6 +20,7 @@ public class RespuestaController {
 
     // ===== EMITIR RESPUESTA =====
     @PostMapping("/{numeroTramite}")
+    @PreAuthorize("hasAnyRole('MESA_PARTES', 'ADMINISTRADOR')")
     public ResponseEntity<RespuestaResponseDTO> emitirRespuesta(
             @PathVariable String numeroTramite,
             @RequestBody @Valid RespuestaRequestDTO request
@@ -28,6 +30,7 @@ public class RespuestaController {
 
     // ===== VER RESPUESTAS POR TRÁMITE =====
     @GetMapping("/{numeroTramite}")
+    @PreAuthorize("hasAnyRole('MESA_PARTES', 'ADMINISTRADOR')")
     public ResponseEntity<List<RespuestaResponseDTO>> obtenerRespuestas(
             @PathVariable String numeroTramite
     ) {

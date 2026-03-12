@@ -1,34 +1,41 @@
 package com.mesapartes.sgd.service;
 
 import com.mesapartes.sgd.dto.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 import java.util.UUID;
 
 public interface GestionCuentaService {
 
-    // ===== PERSONA NATURAL =====
+    // PERFIL NATURAL
+    @PreAuthorize("#numeroDocumento == authentication.name or hasRole('ADMINISTRADOR')")
+    PerfilNaturalResponseDTO editarNatural(String numeroDocumento, EditarNaturalRequestDTO req);
+
+    @PreAuthorize("isAuthenticated()")
     PerfilNaturalResponseDTO obtenerPerfilNatural(String numeroDocumento);
 
-    PerfilNaturalResponseDTO editarNatural(String numeroDocumento,
-                                           EditarNaturalRequestDTO request);
+    // PERFIL JURÍDICO
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    PerfilJuridicaResponseDTO editarJuridica(String ruc, EditarJuridicaRequestDTO req);
 
-    // ===== PERSONA JURÍDICA =====
+    @PreAuthorize("isAuthenticated()")
     PerfilJuridicaResponseDTO obtenerPerfilJuridica(String ruc);
 
-    PerfilJuridicaResponseDTO editarJuridica(String ruc, EditarJuridicaRequestDTO request);
+    // CONTACTOS DE NOTIFICACIÓN
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    ContactoNotificacionResponseDTO agregarContacto(String ruc, ContactoNotificacionDTO request);
 
-    // ===== CONTACTOS DE NOTIFICACIÓN (Jurídica) =====
-    List<ContactoNotificacionResponseDTO> listarContactos(String ruc);
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
+    ContactoNotificacionResponseDTO toggleEstadoContacto(String ruc, UUID contactoId, ToggleContactoDTO request);
 
-    ContactoNotificacionResponseDTO agregarContacto(String ruc,
-                                                    ContactoNotificacionDTO request);
-
-    ContactoNotificacionResponseDTO toggleEstadoContacto(String ruc, UUID contactoId,
-                                                         ToggleContactoDTO request);
-
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     void eliminarContacto(String ruc, UUID contactoId);
 
-    // ===== CAMBIAR CONTRASEÑA (ambos) =====
+    @PreAuthorize("isAuthenticated()")
+    List<ContactoNotificacionResponseDTO> listarContactos(String ruc);
+
+    // CAMBIO DE CONTRASEÑA
+    @PreAuthorize("#request.numeroDocumento == authentication.name or hasRole('ADMINISTRADOR')")
     void cambiarPassword(CambiarPasswordRequestDTO request);
 }

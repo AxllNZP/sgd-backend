@@ -4,6 +4,9 @@ import com.mesapartes.sgd.dto.*;
 import com.mesapartes.sgd.entity.ContactoNotificacion;
 import com.mesapartes.sgd.entity.PersonaJuridica;
 import com.mesapartes.sgd.entity.PersonaNatural;
+import com.mesapartes.sgd.exception.BadRequestException;
+import com.mesapartes.sgd.exception.BusinessConflictException;
+import com.mesapartes.sgd.exception.ResourceNotFoundException;
 import com.mesapartes.sgd.repository.ContactoNotificacionRepository;
 import com.mesapartes.sgd.repository.PersonaJuridicaRepository;
 import com.mesapartes.sgd.repository.PersonaNaturalRepository;
@@ -14,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,12 +29,19 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     private final ContactoNotificacionRepository contactoRepo;
     private final PasswordEncoder passwordEncoder;
 
+    private static final Pattern EMAIL_PATTERN =
+            Pattern.compile("^[A-Za-z0-9+_.-]+@(.+)$");
+
     // ===== OBTENER PERFIL NATURAL =====
     @Override
     public PerfilNaturalResponseDTO obtenerPerfilNatural(String numeroDocumento) {
+
+        validarCampoObligatorio(numeroDocumento, "número de documento");
+
         PersonaNatural persona = naturalRepo.findByNumeroDocumento(numeroDocumento)
-                .orElseThrow(() -> new RuntimeException(
-                        "Cuenta no encontrada: " + numeroDocumento));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Cuenta natural", numeroDocumento));
+
         return mapearPerfilNatural(persona);
     }
 
@@ -38,19 +49,23 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     @Override
     public PerfilNaturalResponseDTO editarNatural(String numeroDocumento,
                                                   EditarNaturalRequestDTO request) {
-        PersonaNatural persona = naturalRepo.findByNumeroDocumento(numeroDocumento)
-                .orElseThrow(() -> new RuntimeException(
-                        "Cuenta no encontrada: " + numeroDocumento));
 
-        // Verificar si el nuevo email ya está en uso por otra cuenta
+        validarCampoObligatorio(numeroDocumento, "número de documento");
+
+        PersonaNatural persona = naturalRepo.findByNumeroDocumento(numeroDocumento)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Cuenta natural", numeroDocumento));
+
+        validarEmail(request.getEmail());
+
+        // Verificar duplicidad email
         if (!persona.getEmail().equalsIgnoreCase(request.getEmail())) {
             if (naturalRepo.existsByEmail(request.getEmail())) {
-                throw new RuntimeException(
+                throw new BusinessConflictException(
                         "El email ya está registrado en otra cuenta");
             }
         }
 
-        // Actualizar campos editables
         persona.setDireccion(request.getDireccion());
         persona.setTelefono(request.getTelefono());
         persona.setEmail(request.getEmail());
@@ -64,9 +79,13 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     // ===== OBTENER PERFIL JURÍDICA =====
     @Override
     public PerfilJuridicaResponseDTO obtenerPerfilJuridica(String ruc) {
+
+        validarCampoObligatorio(ruc, "RUC");
+
         PersonaJuridica empresa = juridicaRepo.findByRuc(ruc)
-                .orElseThrow(() -> new RuntimeException(
-                        "Cuenta no encontrada con RUC: " + ruc));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Cuenta jurídica", ruc));
+
         return mapearPerfilJuridica(empresa);
     }
 
@@ -74,11 +93,13 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     @Override
     public PerfilJuridicaResponseDTO editarJuridica(String ruc,
                                                     EditarJuridicaRequestDTO request) {
-        PersonaJuridica empresa = juridicaRepo.findByRuc(ruc)
-                .orElseThrow(() -> new RuntimeException(
-                        "Cuenta no encontrada con RUC: " + ruc));
 
-        // Actualizar campos editables
+        validarCampoObligatorio(ruc, "RUC");
+
+        PersonaJuridica empresa = juridicaRepo.findByRuc(ruc)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Cuenta jurídica", ruc));
+
         empresa.setDireccion(request.getDireccion());
         empresa.setTelefono(request.getTelefono());
         empresa.setDepartamento(request.getDepartamento());
@@ -91,9 +112,12 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     // ===== LISTAR CONTACTOS =====
     @Override
     public List<ContactoNotificacionResponseDTO> listarContactos(String ruc) {
+
+        validarCampoObligatorio(ruc, "RUC");
+
         PersonaJuridica empresa = juridicaRepo.findByRuc(ruc)
-                .orElseThrow(() -> new RuntimeException(
-                        "Cuenta no encontrada con RUC: " + ruc));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Cuenta jurídica", ruc));
 
         return contactoRepo.findByPersonaJuridica(empresa)
                 .stream()
@@ -105,9 +129,14 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     @Override
     public ContactoNotificacionResponseDTO agregarContacto(String ruc,
                                                            ContactoNotificacionDTO request) {
+
+        validarCampoObligatorio(ruc, "RUC");
+        validarCampoObligatorio(request.getNombres(), "nombres del contacto");
+        validarEmail(request.getEmail());
+
         PersonaJuridica empresa = juridicaRepo.findByRuc(ruc)
-                .orElseThrow(() -> new RuntimeException(
-                        "Cuenta no encontrada con RUC: " + ruc));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Cuenta jurídica", ruc));
 
         ContactoNotificacion contacto = new ContactoNotificacion();
         contacto.setPersonaJuridica(empresa);
@@ -123,37 +152,43 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     public ContactoNotificacionResponseDTO toggleEstadoContacto(String ruc,
                                                                 UUID contactoId,
                                                                 ToggleContactoDTO request) {
-        // Verificar que el contacto pertenece a esta empresa
+
+        validarCampoObligatorio(ruc, "RUC");
+
         PersonaJuridica empresa = juridicaRepo.findByRuc(ruc)
-                .orElseThrow(() -> new RuntimeException(
-                        "Cuenta no encontrada con RUC: " + ruc));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Cuenta jurídica", ruc));
 
         ContactoNotificacion contacto = contactoRepo.findById(contactoId)
-                .orElseThrow(() -> new RuntimeException(
-                        "Contacto no encontrado: " + contactoId));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Contacto", contactoId));
 
         if (!contacto.getPersonaJuridica().getId().equals(empresa.getId())) {
-            throw new RuntimeException(
+            throw new BusinessConflictException(
                     "El contacto no pertenece a esta empresa");
         }
 
         contacto.setActivo(request.getActivo());
+
         return mapearContacto(contactoRepo.save(contacto));
     }
 
     // ===== ELIMINAR CONTACTO =====
     @Override
     public void eliminarContacto(String ruc, UUID contactoId) {
+
+        validarCampoObligatorio(ruc, "RUC");
+
         PersonaJuridica empresa = juridicaRepo.findByRuc(ruc)
-                .orElseThrow(() -> new RuntimeException(
-                        "Cuenta no encontrada con RUC: " + ruc));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Cuenta jurídica", ruc));
 
         ContactoNotificacion contacto = contactoRepo.findById(contactoId)
-                .orElseThrow(() -> new RuntimeException(
-                        "Contacto no encontrado: " + contactoId));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Contacto", contactoId));
 
         if (!contacto.getPersonaJuridica().getId().equals(empresa.getId())) {
-            throw new RuntimeException(
+            throw new BusinessConflictException(
                     "El contacto no pertenece a esta empresa");
         }
 
@@ -163,22 +198,33 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     // ===== CAMBIAR CONTRASEÑA =====
     @Override
     public void cambiarPassword(CambiarPasswordRequestDTO request) {
-        String tipo = request.getTipoPersna().toUpperCase();
 
-        // Validar que las nuevas contraseñas coincidan
+        validarCampoObligatorio(request.getTipoPersna(), "tipo de persona");
+        validarCampoObligatorio(request.getIdentificador(), "identificador");
+
         if (!request.getNuevaPassword().equals(request.getConfirmarPassword())) {
-            throw new RuntimeException("Las contraseñas nuevas no coinciden");
+            throw new BadRequestException(
+                    "Las contraseñas nuevas no coinciden");
         }
 
+        if (request.getNuevaPassword().length() < 8) {
+            throw new BadRequestException(
+                    "La nueva contraseña debe tener al menos 8 caracteres");
+        }
+
+        String tipo = request.getTipoPersna().toUpperCase();
+
         if ("NATURAL".equals(tipo)) {
+
             PersonaNatural persona = naturalRepo
                     .findByNumeroDocumento(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException(
+                                    "Cuenta natural", request.getIdentificador()));
 
-            // Verificar contraseña actual
             if (!passwordEncoder.matches(request.getPasswordActual(),
                     persona.getPassword())) {
-                throw new RuntimeException(
+                throw new BusinessConflictException(
                         "La contraseña actual es incorrecta");
             }
 
@@ -186,13 +232,16 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
             naturalRepo.save(persona);
 
         } else if ("JURIDICA".equals(tipo)) {
+
             PersonaJuridica empresa = juridicaRepo
                     .findByRuc(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+                    .orElseThrow(() ->
+                            new ResourceNotFoundException(
+                                    "Cuenta jurídica", request.getIdentificador()));
 
             if (!passwordEncoder.matches(request.getPasswordActual(),
                     empresa.getPassword())) {
-                throw new RuntimeException(
+                throw new BusinessConflictException(
                         "La contraseña actual es incorrecta");
             }
 
@@ -200,11 +249,29 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
             juridicaRepo.save(empresa);
 
         } else {
-            throw new RuntimeException("Tipo de persona inválido: " + tipo);
+            throw new BadRequestException(
+                    "Tipo de persona inválido: " + tipo);
         }
     }
 
-    // ===== MÉTODOS PRIVADOS =====
+    // ===== MÉTODOS AUXILIARES =====
+
+    private void validarCampoObligatorio(String valor, String campo) {
+        if (valor == null || valor.isBlank()) {
+            throw new BadRequestException(
+                    "El campo '" + campo + "' es obligatorio");
+        }
+    }
+
+    private void validarEmail(String email) {
+
+        validarCampoObligatorio(email, "email");
+
+        if (!EMAIL_PATTERN.matcher(email).matches()) {
+            throw new BadRequestException(
+                    "El formato del email es inválido: " + email);
+        }
+    }
 
     private PerfilNaturalResponseDTO mapearPerfilNatural(PersonaNatural persona) {
         PerfilNaturalResponseDTO response = new PerfilNaturalResponseDTO();
@@ -229,7 +296,9 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
     }
 
     private PerfilJuridicaResponseDTO mapearPerfilJuridica(PersonaJuridica empresa) {
+
         PerfilJuridicaResponseDTO response = new PerfilJuridicaResponseDTO();
+
         response.setId(empresa.getId());
         response.setRuc(empresa.getRuc());
         response.setRazonSocial(empresa.getRazonSocial());
@@ -252,23 +321,28 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
         response.setAfiliadoBuzon(empresa.isAfiliadoBuzon());
         response.setFechaCreacion(empresa.getFechaCreacion());
 
-        // Mapear contactos
         List<ContactoNotificacionResponseDTO> contactos =
                 contactoRepo.findByPersonaJuridica(empresa)
                         .stream()
                         .map(this::mapearContacto)
                         .collect(Collectors.toList());
+
         response.setContactosNotificacion(contactos);
 
         return response;
     }
 
-    private ContactoNotificacionResponseDTO mapearContacto(ContactoNotificacion contacto) {
-        ContactoNotificacionResponseDTO response = new ContactoNotificacionResponseDTO();
+    private ContactoNotificacionResponseDTO mapearContacto(
+            ContactoNotificacion contacto) {
+
+        ContactoNotificacionResponseDTO response =
+                new ContactoNotificacionResponseDTO();
+
         response.setId(contacto.getId());
         response.setNombres(contacto.getNombres());
         response.setEmail(contacto.getEmail());
         response.setActivo(contacto.isActivo());
+
         return response;
     }
 }

@@ -26,65 +26,134 @@ public class RespuestaServiceImpl implements RespuestaService {
     private final HistorialEstadoRepository historialEstadoRepository;
     private final EmailService emailService;
 
+    /**
+     * Emite una respuesta a un documento y opcionalmente la envía por correo.
+     */
     @Override
     public RespuestaResponseDTO emitirRespuesta(String numeroTramite, RespuestaRequestDTO request) {
-        Documento documento = documentoRepository.findByNumeroTramite(numeroTramite)
-                .orElseThrow(() -> new RuntimeException("Documento no encontrado: " + numeroTramite));
 
-        // Crear respuesta
+        Documento documento = obtenerDocumento(numeroTramite);
+
+        RespuestaDocumento respuesta = crearRespuesta(documento, request, numeroTramite);
+
+        RespuestaDocumento guardada = respuestaRepository.save(respuesta);
+
+        archivarDocumento(documento, request.getUsuarioResponsable());
+
+        registrarHistorial(documento, request.getUsuarioResponsable());
+
+        return mapearRespuesta(guardada, numeroTramite);
+    }
+
+    /**
+     * Obtiene todas las respuestas emitidas para un trámite.
+     */
+    @Override
+    public List<RespuestaResponseDTO> obtenerRespuestasPorTramite(String numeroTramite) {
+
+        Documento documento = obtenerDocumento(numeroTramite);
+
+        return respuestaRepository
+                .findByDocumentoOrderByFechaRespuestaAsc(documento)
+                .stream()
+                .map(respuesta -> mapearRespuesta(respuesta, numeroTramite))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Busca el documento por número de trámite.
+     */
+    private Documento obtenerDocumento(String numeroTramite) {
+        return documentoRepository.findByNumeroTramite(numeroTramite)
+                .orElseThrow(() ->
+                        new RuntimeException("Documento no encontrado: " + numeroTramite));
+    }
+
+    /**
+     * Construye la entidad RespuestaDocumento.
+     */
+    private RespuestaDocumento crearRespuesta(
+            Documento documento,
+            RespuestaRequestDTO request,
+            String numeroTramite) {
+
         RespuestaDocumento respuesta = new RespuestaDocumento();
+
         respuesta.setDocumento(documento);
         respuesta.setContenido(request.getContenido());
         respuesta.setUsuarioResponsable(request.getUsuarioResponsable());
         respuesta.setEnviadoPorEmail(false);
 
-        // Enviar email si corresponde
-        if (request.isEnviarEmail() && documento.getEmailRemitente() != null
+        enviarEmailSiCorresponde(respuesta, documento, request, numeroTramite);
+
+        return respuesta;
+    }
+
+    /**
+     * Envía la respuesta por correo si el request lo solicita.
+     */
+    private void enviarEmailSiCorresponde(
+            RespuestaDocumento respuesta,
+            Documento documento,
+            RespuestaRequestDTO request,
+            String numeroTramite) {
+
+        if (request.isEnviarEmail()
+                && documento.getEmailRemitente() != null
                 && !documento.getEmailRemitente().isEmpty()) {
+
             emailService.enviarRespuestaFormal(
                     documento.getEmailRemitente(),
                     numeroTramite,
                     documento.getRemitente(),
                     request.getContenido()
             );
+
             respuesta.setEnviadoPorEmail(true);
         }
+    }
 
-        RespuestaDocumento guardada = respuestaRepository.save(respuesta);
+    /**
+     * Cambia el estado del documento a ARCHIVADO.
+     */
+    private void archivarDocumento(Documento documento, String usuario) {
 
-        // Archivar documento y registrar historial
         documento.setEstado(EstadoDocumento.ARCHIVADO);
+
         documentoRepository.save(documento);
+    }
+
+    /**
+     * Registra el cambio de estado en el historial.
+     */
+    private void registrarHistorial(Documento documento, String usuario) {
 
         HistorialEstado historial = new HistorialEstado();
+
         historial.setDocumento(documento);
         historial.setEstado(EstadoDocumento.ARCHIVADO);
-        historial.setObservacion("Respuesta emitida al ciudadano por: " + request.getUsuarioResponsable());
-        historial.setUsuarioResponsable(request.getUsuarioResponsable());
+        historial.setObservacion("Respuesta emitida al ciudadano por: " + usuario);
+        historial.setUsuarioResponsable(usuario);
+
         historialEstadoRepository.save(historial);
-
-        return mapearRespuesta(guardada, numeroTramite);
     }
 
-    @Override
-    public List<RespuestaResponseDTO> obtenerRespuestasPorTramite(String numeroTramite) {
-        Documento documento = documentoRepository.findByNumeroTramite(numeroTramite)
-                .orElseThrow(() -> new RuntimeException("Documento no encontrado: " + numeroTramite));
+    /**
+     * Convierte entidad a DTO de respuesta.
+     */
+    private RespuestaResponseDTO mapearRespuesta(
+            RespuestaDocumento respuesta,
+            String numeroTramite) {
 
-        return respuestaRepository.findByDocumentoOrderByFechaRespuestaAsc(documento)
-                .stream()
-                .map(r -> mapearRespuesta(r, numeroTramite))
-                .collect(Collectors.toList());
-    }
-
-    private RespuestaResponseDTO mapearRespuesta(RespuestaDocumento respuesta, String numeroTramite) {
         RespuestaResponseDTO response = new RespuestaResponseDTO();
+
         response.setId(respuesta.getId());
         response.setNumeroTramite(numeroTramite);
         response.setContenido(respuesta.getContenido());
         response.setUsuarioResponsable(respuesta.getUsuarioResponsable());
         response.setFechaRespuesta(respuesta.getFechaRespuesta());
         response.setEnviadoPorEmail(respuesta.isEnviadoPorEmail());
+
         return response;
     }
 }

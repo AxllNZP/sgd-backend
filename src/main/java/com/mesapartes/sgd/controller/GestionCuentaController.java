@@ -5,6 +5,7 @@ import com.mesapartes.sgd.service.GestionCuentaService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,6 +31,7 @@ public class GestionCuentaController {
 
     // PUT /api/cuenta/natural/{numeroDocumento}
     @PutMapping("/natural/{numeroDocumento}")
+    @PreAuthorize("#numeroDocumento == authentication.name or hasRole('ADMINISTRADOR')")
     public ResponseEntity<PerfilNaturalResponseDTO> editarNatural(
             @PathVariable String numeroDocumento,
             @RequestBody @Valid EditarNaturalRequestDTO request

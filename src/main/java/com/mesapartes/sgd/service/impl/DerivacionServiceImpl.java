@@ -3,6 +3,8 @@ package com.mesapartes.sgd.service.impl;
 import com.mesapartes.sgd.dto.DerivacionRequestDTO;
 import com.mesapartes.sgd.dto.DerivacionResponseDTO;
 import com.mesapartes.sgd.entity.*;
+import com.mesapartes.sgd.exception.BusinessException;
+import com.mesapartes.sgd.exception.ResourceNotFoundException;
 import com.mesapartes.sgd.repository.AreaRepository;
 import com.mesapartes.sgd.repository.DerivacionRepository;
 import com.mesapartes.sgd.repository.DocumentoRepository;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -24,42 +27,51 @@ public class DerivacionServiceImpl implements DerivacionService {
     private final HistorialEstadoRepository historialEstadoRepository;
 
     @Override
-    public DerivacionResponseDTO derivarDocumento(String numeroTramite, DerivacionRequestDTO request) {
+    @Transactional(rollbackFor = Exception.class)
+    public DerivacionResponseDTO derivarDocumento(String numeroTramite,
+                                                  DerivacionRequestDTO request) {
+
         Documento documento = documentoRepository.findByNumeroTramite(numeroTramite)
-                .orElseThrow(() -> new RuntimeException("Documento no encontrado: " + numeroTramite));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Documento no encontrado: " + numeroTramite));
 
         if (documento.getArea() == null) {
-            throw new RuntimeException("El documento no tiene área asignada aún");
+            throw new BusinessException(
+                    "El documento no tiene área asignada aún");
         }
 
         Area areaOrigen = documento.getArea();
+
         Area areaDestino = areaRepository.findById(request.getAreaDestinoId())
-                .orElseThrow(() -> new RuntimeException("Área destino no encontrada"));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Área destino no encontrada"));
 
         if (areaOrigen.getId().equals(areaDestino.getId())) {
-            throw new RuntimeException("El área origen y destino no pueden ser la misma");
+            throw new BusinessException(
+                    "El área origen y destino no pueden ser la misma");
         }
 
-        // Registrar derivación
         Derivacion derivacion = new Derivacion();
         derivacion.setDocumento(documento);
         derivacion.setAreaOrigen(areaOrigen);
         derivacion.setAreaDestino(areaDestino);
         derivacion.setMotivo(request.getMotivo());
         derivacion.setUsuarioResponsable(request.getUsuarioResponsable());
+
         derivacionRepository.save(derivacion);
 
-        // Actualizar área del documento
         documento.setArea(areaDestino);
         documentoRepository.save(documento);
 
-        // Registrar en historial
         HistorialEstado historial = new HistorialEstado();
         historial.setDocumento(documento);
         historial.setEstado(documento.getEstado());
-        historial.setObservacion("Derivado de " + areaOrigen.getNombre() +
-                " a " + areaDestino.getNombre() + ". Motivo: " + request.getMotivo());
+        historial.setObservacion(
+                "Derivado de " + areaOrigen.getNombre() +
+                        " a " + areaDestino.getNombre() +
+                        ". Motivo: " + request.getMotivo());
         historial.setUsuarioResponsable(request.getUsuarioResponsable());
+
         historialEstadoRepository.save(historial);
 
         return mapearRespuesta(derivacion, numeroTramite);
@@ -67,10 +79,13 @@ public class DerivacionServiceImpl implements DerivacionService {
 
     @Override
     public List<DerivacionResponseDTO> obtenerDerivacionesPorTramite(String numeroTramite) {
-        Documento documento = documentoRepository.findByNumeroTramite(numeroTramite)
-                .orElseThrow(() -> new RuntimeException("Documento no encontrado: " + numeroTramite));
 
-        return derivacionRepository.findByDocumentoOrderByFechaDerivacionAsc(documento)
+        Documento documento = documentoRepository.findByNumeroTramite(numeroTramite)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Documento no encontrado: " + numeroTramite));
+
+        return derivacionRepository
+                .findByDocumentoOrderByFechaDerivacionAsc(documento)
                 .stream()
                 .map(d -> mapearRespuesta(d, numeroTramite))
                 .collect(Collectors.toList());

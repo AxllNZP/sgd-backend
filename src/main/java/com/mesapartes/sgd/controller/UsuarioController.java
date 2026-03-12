@@ -6,6 +6,7 @@ import com.mesapartes.sgd.service.UsuarioService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -20,6 +21,7 @@ public class UsuarioController {
 
     // ===== CREAR USUARIO =====
     @PostMapping
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<UsuarioResponseDTO> crearUsuario(
             @RequestBody @Valid UsuarioRequestDTO request
     ) {
@@ -28,6 +30,7 @@ public class UsuarioController {
 
     // ===== OBTENER POR ID =====
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<UsuarioResponseDTO> obtenerPorId(
             @PathVariable UUID id
     ) {
@@ -36,6 +39,7 @@ public class UsuarioController {
 
     // ===== OBTENER POR EMAIL =====
     @GetMapping("/email/{email}")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<UsuarioResponseDTO> obtenerPorEmail(
             @PathVariable String email
     ) {
@@ -44,12 +48,14 @@ public class UsuarioController {
 
     // ===== LISTAR TODOS =====
     @GetMapping
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<List<UsuarioResponseDTO>> listarTodos() {
         return ResponseEntity.ok(usuarioService.listarTodos());
     }
 
     // ===== DESACTIVAR USUARIO =====
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMINISTRADOR')")
     public ResponseEntity<Void> desactivarUsuario(
             @PathVariable UUID id
     ) {

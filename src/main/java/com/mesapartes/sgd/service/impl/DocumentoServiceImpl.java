@@ -14,6 +14,9 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.util.StringUtils;
+import java.nio.file.StandardCopyOption;
+import java.util.Set;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -26,6 +29,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import com.mesapartes.sgd.exception.BadRequestException;
+import com.mesapartes.sgd.exception.FileStorageException;
+import com.mesapartes.sgd.exception.ResourceNotFoundException;
+
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -38,12 +51,16 @@ public class DocumentoServiceImpl implements DocumentoService {
     private final PersonaNaturalRepository naturalRepo;
     private final PersonaJuridicaRepository juridicaRepo;
     private final ContactoNotificacionRepository contactoRepo;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Value("${storage.location}")
     private String storageLocation;
+    private static final Set<String> EXTENSIONES_PERMITIDAS =
+            Set.of(".pdf", ".docx", ".xlsx", ".jpg", ".jpeg", ".png");
 
     // ===== REGISTRAR DOCUMENTO =====
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public DocumentoResponseDTO registrarDocumento(DocumentoRequestDTO request,
                                                    MultipartFile archivo,
                                                    MultipartFile anexo) throws IOException {
@@ -51,7 +68,7 @@ public class DocumentoServiceImpl implements DocumentoService {
         if (archivo != null && !archivo.isEmpty()) {
             long maxArchivo = 50L * 1024 * 1024;
             if (archivo.getSize() > maxArchivo) {
-                throw new RuntimeException(
+                throw new BadRequestException(
                         "El archivo principal supera el tamaño máximo permitido de 50MB");
             }
         }
@@ -60,7 +77,7 @@ public class DocumentoServiceImpl implements DocumentoService {
         if (anexo != null && !anexo.isEmpty()) {
             long maxAnexo = 20L * 1024 * 1024;
             if (anexo.getSize() > maxAnexo) {
-                throw new RuntimeException(
+                throw new BadRequestException(
                         "El anexo supera el tamaño máximo permitido de 20MB");
             }
         }
@@ -116,8 +133,12 @@ public class DocumentoServiceImpl implements DocumentoService {
         registrarHistorial(guardado, EstadoDocumento.RECIBIDO,
                 "Documento registrado en Mesa de Partes", "SISTEMA");
 
+        applicationEventPublisher.publishEvent(
+                new com.mesapartes.sgd.event.DocumentoRegistradoEvent(this, guardado, request)
+        );
         // ===== ENVIAR NOTIFICACIONES POR EMAIL =====
         enviarNotificaciones(guardado, request);
+
 
         return mapearRespuesta(guardado);
     }
@@ -189,15 +210,16 @@ public class DocumentoServiceImpl implements DocumentoService {
 
     // ===== CONSULTAR POR NÚMERO DE TRÁMITE =====
     @Override
+    @Transactional(readOnly = true)
     public DocumentoResponseDTO consultarPorNumeroTramite(String numeroTramite) {
         Documento documento = documentoRepository.findByNumeroTramite(numeroTramite)
-                .orElseThrow(() -> new RuntimeException(
-                        "Documento no encontrado: " + numeroTramite));
+                .orElseThrow(() -> new ResourceNotFoundException("Documento", numeroTramite));
         return mapearRespuesta(documento);
     }
 
     // ===== LISTAR TODOS =====
     @Override
+    @Transactional(readOnly = true)
     public List<DocumentoResponseDTO> listarTodos() {
         return documentoRepository.findAll()
                 .stream()
@@ -205,8 +227,17 @@ public class DocumentoServiceImpl implements DocumentoService {
                 .collect(Collectors.toList());
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Page<DocumentoResponseDTO> listarTodos(Pageable pageable) {
+        return documentoRepository.findAll(pageable)
+                .map(this::mapearRespuesta);
+    }
+
+
     // ===== LISTAR POR ESTADO =====
     @Override
+    @Transactional(readOnly = true)
     public List<DocumentoResponseDTO> listarPorEstado(EstadoDocumento estado) {
         return documentoRepository.findByEstado(estado)
                 .stream()
@@ -216,11 +247,11 @@ public class DocumentoServiceImpl implements DocumentoService {
 
     // ===== CAMBIAR ESTADO =====
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public DocumentoResponseDTO cambiarEstado(String numeroTramite,
                                               CambioEstadoDTO cambioEstadoDTO) {
         Documento documento = documentoRepository.findByNumeroTramite(numeroTramite)
-                .orElseThrow(() -> new RuntimeException(
-                        "Documento no encontrado: " + numeroTramite));
+                .orElseThrow(() -> new ResourceNotFoundException("Documento", numeroTramite));
 
         documento.setEstado(cambioEstadoDTO.getEstado());
         Documento actualizado = documentoRepository.save(documento);
@@ -229,15 +260,9 @@ public class DocumentoServiceImpl implements DocumentoService {
                 cambioEstadoDTO.getObservacion(),
                 cambioEstadoDTO.getUsuarioResponsable());
 
-        if (actualizado.getEmailRemitente() != null
-                && !actualizado.getEmailRemitente().isEmpty()) {
-            emailService.enviarCambioEstado(
-                    actualizado.getEmailRemitente(),
-                    numeroTramite,
-                    cambioEstadoDTO.getEstado().name(),
-                    cambioEstadoDTO.getObservacion()
-            );
-        }
+        applicationEventPublisher.publishEvent(
+                new com.mesapartes.sgd.event.CambioEstadoDocumentoEvent(this, actualizado, cambioEstadoDTO)
+        );
 
         return mapearRespuesta(actualizado);
     }
@@ -246,11 +271,11 @@ public class DocumentoServiceImpl implements DocumentoService {
     @Override
     public Resource descargarArchivo(String numeroTramite) {
         Documento documento = documentoRepository.findByNumeroTramite(numeroTramite)
-                .orElseThrow(() -> new RuntimeException(
-                        "Documento no encontrado: " + numeroTramite));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Documento no encontrado", numeroTramite));
 
         if (documento.getRutaArchivo() == null) {
-            throw new RuntimeException("Este documento no tiene archivo adjunto");
+            throw new BadRequestException("Este documento no tiene archivo adjunto");
         }
 
         return obtenerResource(documento.getRutaArchivo());
@@ -264,7 +289,7 @@ public class DocumentoServiceImpl implements DocumentoService {
                         "Documento no encontrado: " + numeroTramite));
 
         if (documento.getRutaAnexo() == null) {
-            throw new RuntimeException("Este documento no tiene anexo adjunto");
+            throw new BadRequestException("Este documento no tiene anexo adjunto");
         }
 
         return obtenerResource(documento.getRutaAnexo());
@@ -278,6 +303,13 @@ public class DocumentoServiceImpl implements DocumentoService {
                 .map(this::mapearRespuesta)
                 .collect(Collectors.toList());
     }
+    @Override
+    @Transactional(readOnly = true)
+    public Page<DocumentoResponseDTO> buscarPorFiltros(DocumentoFiltroDTO filtro, Pageable pageable) {
+        // Nota: documentoRepository debe soportar findAll(Specification, Pageable)
+        return documentoRepository.findAll(DocumentoSpecification.conFiltros(filtro), pageable)
+                .map(this::mapearRespuesta);
+    }
 
     // ===== ASIGNAR ÁREA =====
     @Override
@@ -287,8 +319,8 @@ public class DocumentoServiceImpl implements DocumentoService {
                         "Documento no encontrado: " + numeroTramite));
 
         Area area = areaRepository.findById(areaId)
-                .orElseThrow(() -> new RuntimeException(
-                        "Área no encontrada: " + areaId));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Área", areaId));
 
         documento.setArea(area);
         documento.setEstado(EstadoDocumento.EN_PROCESO);
@@ -396,29 +428,72 @@ public class DocumentoServiceImpl implements DocumentoService {
         return "MP-" + fecha + "-" + unico;
     }
 
-    private String guardarArchivo(MultipartFile archivo, String numeroTramite,
+    private String guardarArchivo(MultipartFile archivo,
+                                  String numeroTramite,
                                   String prefijo) throws IOException {
-        Path carpeta = Paths.get(storageLocation);
-        if (!Files.exists(carpeta)) {
-            Files.createDirectories(carpeta);
+
+        Path base = Paths.get(storageLocation).toAbsolutePath().normalize();
+
+        if (!Files.exists(base)) {
+            Files.createDirectories(base);
         }
-        String nombreArchivo = numeroTramite + "_" + prefijo
-                + "_" + archivo.getOriginalFilename();
-        Path destino = carpeta.resolve(nombreArchivo);
-        Files.copy(archivo.getInputStream(), destino);
-        return destino.toString();
+
+        // 1️⃣ Limpiar nombre original
+        String originalName = StringUtils.cleanPath(archivo.getOriginalFilename());
+
+        // 2️⃣ Obtener extensión
+        String extension = "";
+        int index = originalName.lastIndexOf(".");
+        if (index > 0) {
+            extension = originalName.substring(index).toLowerCase();
+        }
+
+        // 3️⃣ Validar whitelist
+        if (!EXTENSIONES_PERMITIDAS.contains(extension)) {
+            throw new BadRequestException("Tipo de archivo no permitido: " + extension);
+        }
+
+        // 4️⃣ Generar nombre interno seguro
+        String nombreInterno = UUID.randomUUID() + "_" + prefijo + extension;
+
+        // 5️⃣ Construir ruta segura
+        Path destino = base.resolve(nombreInterno).normalize();
+
+        // 6️⃣ Verificar que no salga del directorio
+        if (!destino.startsWith(base)) {
+            throw new FileStorageException("Intento de Path Traversal detectado");
+        }
+
+        // 7️⃣ Guardar archivo
+        Files.copy(
+                archivo.getInputStream(),
+                destino,
+                StandardCopyOption.REPLACE_EXISTING
+        );
+
+        // 8️⃣ Retornar SOLO nombre interno (no ruta)
+        return nombreInterno;
     }
 
-    private Resource obtenerResource(String ruta) {
+    private Resource obtenerResource(String nombreArchivo) {
         try {
-            Path path = Paths.get(ruta);
-            Resource resource = new UrlResource(path.toUri());
-            if (!resource.exists()) {
-                throw new RuntimeException("El archivo no existe en el servidor");
+            Path base = Paths.get(storageLocation).toAbsolutePath().normalize();
+            Path path = base.resolve(nombreArchivo).normalize();
+
+            if (!path.startsWith(base)) {
+                throw new FileStorageException("Intento de acceso inválido");
             }
+
+            Resource resource = new UrlResource(path.toUri());
+
+            if (!resource.exists()) {
+                throw new ResourceNotFoundException("Archivo no encontrado en el servidor");
+            }
+
             return resource;
+
         } catch (Exception e) {
-            throw new RuntimeException("Error al acceder al archivo: " + e.getMessage());
+            throw new FileStorageException("Error al acceder al archivo", e);
         }
     }
 

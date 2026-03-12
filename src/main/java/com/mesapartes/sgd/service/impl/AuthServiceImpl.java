@@ -3,6 +3,8 @@ package com.mesapartes.sgd.service.impl;
 import com.mesapartes.sgd.dto.LoginRequestDTO;
 import com.mesapartes.sgd.dto.LoginResponseDTO;
 import com.mesapartes.sgd.entity.Usuario;
+import com.mesapartes.sgd.exception.BusinessException;
+import com.mesapartes.sgd.exception.UnauthorizedException;
 import com.mesapartes.sgd.repository.UsuarioRepository;
 import com.mesapartes.sgd.service.AuthService;
 import com.mesapartes.sgd.service.JwtService;
@@ -20,22 +22,24 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LoginResponseDTO login(LoginRequestDTO request) {
-        // Buscar usuario por email
+
         Usuario usuario = usuarioRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("Credenciales incorrectas"));
+                .orElseThrow(() ->
+                        new UnauthorizedException("Credenciales incorrectas"));
 
-        // Verificar password
         if (!passwordEncoder.matches(request.getPassword(), usuario.getPassword())) {
-            throw new RuntimeException("Credenciales incorrectas");
+            throw new UnauthorizedException("Credenciales incorrectas");
         }
 
-        // Verificar que esté activo
         if (!usuario.isActivo()) {
-            throw new RuntimeException("Usuario desactivado, contacte al administrador");
+            throw new BusinessException(
+                    "Usuario desactivado, contacte al administrador");
         }
 
-        // Generar token
-        String token = jwtService.generarToken(usuario.getEmail(), usuario.getRol().name());
+        String token = jwtService.generarToken(
+                usuario.getEmail(),
+                usuario.getRol().name()
+        );
 
         return new LoginResponseDTO(
                 token,

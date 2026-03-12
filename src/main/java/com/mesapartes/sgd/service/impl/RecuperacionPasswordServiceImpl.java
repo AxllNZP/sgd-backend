@@ -1,10 +1,6 @@
 package com.mesapartes.sgd.service.impl;
 
-import com.mesapartes.sgd.dto.NuevaPasswordDTO;
-import com.mesapartes.sgd.dto.PreguntaSeguridadResponseDTO;
-import com.mesapartes.sgd.dto.RecuperacionSolicitarDTO;
-import com.mesapartes.sgd.dto.RecuperacionVerificarCodigoDTO;
-import com.mesapartes.sgd.dto.VerificarPreguntaDTO;
+import com.mesapartes.sgd.dto.*;
 import com.mesapartes.sgd.entity.PersonaJuridica;
 import com.mesapartes.sgd.entity.PersonaNatural;
 import com.mesapartes.sgd.entity.PreguntaSeguridad;
@@ -15,6 +11,9 @@ import com.mesapartes.sgd.service.RecuperacionPasswordService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import java.security.SecureRandom;
+
+
 
 import java.time.LocalDateTime;
 import java.util.Random;
@@ -29,37 +28,28 @@ public class RecuperacionPasswordServiceImpl implements RecuperacionPasswordServ
     private final PasswordEncoder passwordEncoder;
 
     private static final int MINUTOS_EXPIRACION = 10;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     // ===== PASO 1: SOLICITAR RECUPERACIÓN =====
     @Override
     public void solicitarRecuperacion(RecuperacionSolicitarDTO request) {
+
         String tipo = request.getTipoPersna().toUpperCase();
 
         if ("NATURAL".equals(tipo)) {
-            PersonaNatural persona = naturalRepo
-                    .findByNumeroDocumento(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException(
-                            "No se encontró una cuenta con ese documento"));
 
-            // Validar que el email coincida con el registrado
-            if (!persona.getEmail().equalsIgnoreCase(request.getEmail())) {
-                throw new RuntimeException(
-                        "El email no coincide con el registrado en la cuenta");
-            }
+            PersonaNatural persona = obtenerPersonaNatural(request.getIdentificador());
 
-            if (!persona.isActivo()) {
-                throw new RuntimeException(
-                        "Cuenta desactivada. Contacte al administrador.");
-            }
+            validarEmail(persona.getEmail(), request.getEmail());
+            validarCuentaActiva(persona.isActivo());
 
-            // Generar y guardar código
             String codigo = generarCodigo();
+
             persona.setCodigoVerificacion(codigo);
-            persona.setCodigoExpiracion(
-                    LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+            persona.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+
             naturalRepo.save(persona);
 
-            // Enviar email
             emailService.enviarCodigoRecuperacion(
                     persona.getEmail(),
                     persona.getNombres() + " " + persona.getApellidoPaterno(),
@@ -67,30 +57,19 @@ public class RecuperacionPasswordServiceImpl implements RecuperacionPasswordServ
             );
 
         } else if ("JURIDICA".equals(tipo)) {
-            PersonaJuridica empresa = juridicaRepo
-                    .findByRuc(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException(
-                            "No se encontró una cuenta con ese RUC"));
 
-            // Validar que el email coincida con el del representante
-            if (!empresa.getEmailRepresentante().equalsIgnoreCase(request.getEmail())) {
-                throw new RuntimeException(
-                        "El email no coincide con el registrado en la cuenta");
-            }
+            PersonaJuridica empresa = obtenerPersonaJuridica(request.getIdentificador());
 
-            if (!empresa.isActivo()) {
-                throw new RuntimeException(
-                        "Cuenta desactivada. Contacte al administrador.");
-            }
+            validarEmail(empresa.getEmailRepresentante(), request.getEmail());
+            validarCuentaActiva(empresa.isActivo());
 
-            // Generar y guardar código
             String codigo = generarCodigo();
+
             empresa.setCodigoVerificacion(codigo);
-            empresa.setCodigoExpiracion(
-                    LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+            empresa.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+
             juridicaRepo.save(empresa);
 
-            // Enviar email
             emailService.enviarCodigoRecuperacion(
                     empresa.getEmailRepresentante(),
                     empresa.getRazonSocial(),
@@ -105,12 +84,12 @@ public class RecuperacionPasswordServiceImpl implements RecuperacionPasswordServ
     // ===== PASO 2: VERIFICAR CÓDIGO =====
     @Override
     public void verificarCodigoRecuperacion(RecuperacionVerificarCodigoDTO request) {
+
         String tipo = request.getTipoPersna().toUpperCase();
 
         if ("NATURAL".equals(tipo)) {
-            PersonaNatural persona = naturalRepo
-                    .findByNumeroDocumento(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+
+            PersonaNatural persona = obtenerPersonaNatural(request.getIdentificador());
 
             validarCodigo(
                     persona.getCodigoVerificacion(),
@@ -118,13 +97,9 @@ public class RecuperacionPasswordServiceImpl implements RecuperacionPasswordServ
                     request.getCodigo()
             );
 
-            // Código válido: lo dejamos activo para que el paso 3 también lo use
-            // como token de autorización de cambio de contraseña
-
         } else if ("JURIDICA".equals(tipo)) {
-            PersonaJuridica empresa = juridicaRepo
-                    .findByRuc(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+
+            PersonaJuridica empresa = obtenerPersonaJuridica(request.getIdentificador());
 
             validarCodigo(
                     empresa.getCodigoVerificacion(),
@@ -140,53 +115,33 @@ public class RecuperacionPasswordServiceImpl implements RecuperacionPasswordServ
     // ===== PASO 3: ESTABLECER NUEVA CONTRASEÑA =====
     @Override
     public void establecerNuevaPassword(NuevaPasswordDTO request) {
+
         String tipo = request.getTipoPersna().toUpperCase();
 
-        // Validar que ambas contraseñas coincidan
         if (!request.getNuevaPassword().equals(request.getConfirmarPassword())) {
-            throw new RuntimeException(
-                    "Las contraseñas no coinciden");
+            throw new RuntimeException("Las contraseñas no coinciden");
         }
 
         if ("NATURAL".equals(tipo)) {
-            PersonaNatural persona = naturalRepo
-                    .findByNumeroDocumento(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
 
-            // Verificar que aún tenga un código activo y vigente
-            // (garantiza que pasó por los pasos 1 y 2)
-            if (persona.getCodigoVerificacion() == null) {
-                throw new RuntimeException(
-                        "Sesión de recuperación inválida. Inicie el proceso nuevamente.");
-            }
-            if (LocalDateTime.now().isAfter(persona.getCodigoExpiracion())) {
-                throw new RuntimeException(
-                        "La sesión de recuperación expiró. Inicie el proceso nuevamente.");
-            }
+            PersonaNatural persona = obtenerPersonaNatural(request.getIdentificador());
 
-            // Guardar nueva contraseña y limpiar código
+            validarSesionRecuperacion(persona.getCodigoVerificacion(), persona.getCodigoExpiracion());
+
             persona.setPassword(passwordEncoder.encode(request.getNuevaPassword()));
-            persona.setCodigoVerificacion(null);
-            persona.setCodigoExpiracion(null);
+            limpiarCodigoRecuperacion(persona);
+
             naturalRepo.save(persona);
 
         } else if ("JURIDICA".equals(tipo)) {
-            PersonaJuridica empresa = juridicaRepo
-                    .findByRuc(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
 
-            if (empresa.getCodigoVerificacion() == null) {
-                throw new RuntimeException(
-                        "Sesión de recuperación inválida. Inicie el proceso nuevamente.");
-            }
-            if (LocalDateTime.now().isAfter(empresa.getCodigoExpiracion())) {
-                throw new RuntimeException(
-                        "La sesión de recuperación expiró. Inicie el proceso nuevamente.");
-            }
+            PersonaJuridica empresa = obtenerPersonaJuridica(request.getIdentificador());
+
+            validarSesionRecuperacion(empresa.getCodigoVerificacion(), empresa.getCodigoExpiracion());
 
             empresa.setPassword(passwordEncoder.encode(request.getNuevaPassword()));
-            empresa.setCodigoVerificacion(null);
-            empresa.setCodigoExpiracion(null);
+            limpiarCodigoRecuperacion(empresa);
+
             juridicaRepo.save(empresa);
 
         } else {
@@ -194,35 +149,23 @@ public class RecuperacionPasswordServiceImpl implements RecuperacionPasswordServ
         }
     }
 
-    // ===== VÍA B - PASO 1: OBTENER PREGUNTA SECRETA =====
+    // ===== VÍA B: OBTENER PREGUNTA =====
     @Override
-    public PreguntaSeguridadResponseDTO obtenerPreguntaSeguridad(String tipoPersna,
-                                                                 String identificador) {
+    public PreguntaSeguridadResponseDTO obtenerPreguntaSeguridad(String tipoPersna, String identificador) {
+
         String tipo = tipoPersna.toUpperCase();
         PreguntaSeguridad pregunta;
 
         if ("NATURAL".equals(tipo)) {
-            PersonaNatural persona = naturalRepo
-                    .findByNumeroDocumento(identificador)
-                    .orElseThrow(() -> new RuntimeException(
-                            "No se encontró una cuenta con ese documento"));
 
-            if (!persona.isActivo()) {
-                throw new RuntimeException("Cuenta desactivada. Contacte al administrador.");
-            }
-
+            PersonaNatural persona = obtenerPersonaNatural(identificador);
+            validarCuentaActiva(persona.isActivo());
             pregunta = persona.getPreguntaSeguridad();
 
         } else if ("JURIDICA".equals(tipo)) {
-            PersonaJuridica empresa = juridicaRepo
-                    .findByRuc(identificador)
-                    .orElseThrow(() -> new RuntimeException(
-                            "No se encontró una cuenta con ese RUC"));
 
-            if (!empresa.isActivo()) {
-                throw new RuntimeException("Cuenta desactivada. Contacte al administrador.");
-            }
-
+            PersonaJuridica empresa = obtenerPersonaJuridica(identificador);
+            validarCuentaActiva(empresa.isActivo());
             pregunta = empresa.getPreguntaSeguridad();
 
         } else {
@@ -232,55 +175,30 @@ public class RecuperacionPasswordServiceImpl implements RecuperacionPasswordServ
         return new PreguntaSeguridadResponseDTO(pregunta, pregunta.getDescripcion());
     }
 
-    // ===== VÍA B - PASO 2: VERIFICAR RESPUESTA SECRETA =====
+    // ===== VÍA B: VERIFICAR RESPUESTA =====
     @Override
     public void verificarRespuestaSecreta(VerificarPreguntaDTO request) {
+
         String tipo = request.getTipoPersna().toUpperCase();
 
         if ("NATURAL".equals(tipo)) {
-            PersonaNatural persona = naturalRepo
-                    .findByNumeroDocumento(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
 
-            // Verificar que la pregunta coincida
-            if (!persona.getPreguntaSeguridad().equals(request.getPreguntaSeguridad())) {
-                throw new RuntimeException("La pregunta de seguridad no coincide");
-            }
+            PersonaNatural persona = obtenerPersonaNatural(request.getIdentificador());
 
-            // Verificar respuesta (ignorando mayúsculas y espacios)
-            String respuestaGuardada = persona.getRespuestaSeguridad().trim().toLowerCase();
-            String respuestaIngresada = request.getRespuesta().trim().toLowerCase();
+            validarPregunta(persona.getPreguntaSeguridad(), request.getPreguntaSeguridad());
+            validarRespuesta(persona.getRespuestaSeguridad(), request.getRespuesta());
 
-            if (!respuestaGuardada.equals(respuestaIngresada)) {
-                throw new RuntimeException("La respuesta de seguridad es incorrecta");
-            }
-
-            // Respuesta correcta: generar token temporal de recuperación
-            // Reutilizamos el campo codigoVerificacion como sesión de recuperación
-            String tokenTemporal = generarCodigo();
-            persona.setCodigoVerificacion(tokenTemporal);
-            persona.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+            generarSesionRecuperacion(persona);
             naturalRepo.save(persona);
 
         } else if ("JURIDICA".equals(tipo)) {
-            PersonaJuridica empresa = juridicaRepo
-                    .findByRuc(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
 
-            if (!empresa.getPreguntaSeguridad().equals(request.getPreguntaSeguridad())) {
-                throw new RuntimeException("La pregunta de seguridad no coincide");
-            }
+            PersonaJuridica empresa = obtenerPersonaJuridica(request.getIdentificador());
 
-            String respuestaGuardada = empresa.getRespuestaSeguridad().trim().toLowerCase();
-            String respuestaIngresada = request.getRespuesta().trim().toLowerCase();
+            validarPregunta(empresa.getPreguntaSeguridad(), request.getPreguntaSeguridad());
+            validarRespuesta(empresa.getRespuestaSeguridad(), request.getRespuesta());
 
-            if (!respuestaGuardada.equals(respuestaIngresada)) {
-                throw new RuntimeException("La respuesta de seguridad es incorrecta");
-            }
-
-            String tokenTemporal = generarCodigo();
-            empresa.setCodigoVerificacion(tokenTemporal);
-            empresa.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+            generarSesionRecuperacion(empresa);
             juridicaRepo.save(empresa);
 
         } else {
@@ -289,22 +207,91 @@ public class RecuperacionPasswordServiceImpl implements RecuperacionPasswordServ
     }
 
     // ===== MÉTODOS PRIVADOS =====
-    private String generarCodigo() {
-        Random random = new Random();
-        int numero = 100000 + random.nextInt(900000);
-        return String.valueOf(numero);
+
+    private PersonaNatural obtenerPersonaNatural(String documento) {
+        return naturalRepo.findByNumeroDocumento(documento)
+                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
     }
 
-    private void validarCodigo(String codigoGuardado, LocalDateTime expiracion,
-                               String codigoIngresado) {
-        if (codigoGuardado == null) {
-            throw new RuntimeException(
-                    "No hay un proceso de recuperación activo. Inicie el proceso nuevamente.");
+    private PersonaJuridica obtenerPersonaJuridica(String ruc) {
+        return juridicaRepo.findByRuc(ruc)
+                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+    }
+
+    private void validarEmail(String registrado, String ingresado) {
+        if (!registrado.equalsIgnoreCase(ingresado)) {
+            throw new RuntimeException("El email no coincide con el registrado en la cuenta");
         }
+    }
+
+    private void validarCuentaActiva(boolean activo) {
+        if (!activo) {
+            throw new RuntimeException("Cuenta desactivada. Contacte al administrador.");
+        }
+    }
+
+    private void validarSesionRecuperacion(String codigo, LocalDateTime expiracion) {
+
+        if (codigo == null) {
+            throw new RuntimeException("Sesión de recuperación inválida. Inicie el proceso nuevamente.");
+        }
+
         if (LocalDateTime.now().isAfter(expiracion)) {
-            throw new RuntimeException(
-                    "El código ha expirado. Solicite uno nuevo.");
+            throw new RuntimeException("La sesión de recuperación expiró. Inicie el proceso nuevamente.");
         }
+    }
+
+    private void limpiarCodigoRecuperacion(PersonaNatural persona) {
+        persona.setCodigoVerificacion(null);
+        persona.setCodigoExpiracion(null);
+    }
+
+    private void limpiarCodigoRecuperacion(PersonaJuridica empresa) {
+        empresa.setCodigoVerificacion(null);
+        empresa.setCodigoExpiracion(null);
+    }
+
+    private void validarPregunta(PreguntaSeguridad guardada, PreguntaSeguridad ingresada) {
+        if (!guardada.equals(ingresada)) {
+            throw new RuntimeException("La pregunta de seguridad no coincide");
+        }
+    }
+
+    private void validarRespuesta(String guardada, String ingresada) {
+
+        String respuestaGuardada = guardada.trim().toLowerCase();
+        String respuestaIngresada = ingresada.trim().toLowerCase();
+
+        if (!respuestaGuardada.equals(respuestaIngresada)) {
+            throw new RuntimeException("La respuesta de seguridad es incorrecta");
+        }
+    }
+
+    private void generarSesionRecuperacion(PersonaNatural persona) {
+        persona.setCodigoVerificacion(generarCodigo());
+        persona.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+    }
+
+    private void generarSesionRecuperacion(PersonaJuridica empresa) {
+        empresa.setCodigoVerificacion(generarCodigo());
+        empresa.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+    }
+
+    private String generarCodigo() {
+        int codigo = 10_000_000 + SECURE_RANDOM.nextInt(90_000_000);
+        return String.valueOf(codigo);
+    }
+
+    private void validarCodigo(String codigoGuardado, LocalDateTime expiracion, String codigoIngresado) {
+
+        if (codigoGuardado == null) {
+            throw new RuntimeException("No hay un proceso de recuperación activo. Inicie el proceso nuevamente.");
+        }
+
+        if (LocalDateTime.now().isAfter(expiracion)) {
+            throw new RuntimeException("El código ha expirado. Solicite uno nuevo.");
+        }
+
         if (!codigoGuardado.equals(codigoIngresado)) {
             throw new RuntimeException("El código ingresado es incorrecto");
         }

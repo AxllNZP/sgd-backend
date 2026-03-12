@@ -6,6 +6,7 @@ import com.mesapartes.sgd.service.DerivacionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,6 +20,7 @@ public class DerivacionController {
 
     // ===== DERIVAR DOCUMENTO =====
     @PostMapping("/{numeroTramite}")
+    @PreAuthorize("hasAnyRole('MESA_PARTES', 'ADMINISTRADOR')")
     public ResponseEntity<DerivacionResponseDTO> derivarDocumento(
             @PathVariable String numeroTramite,
             @RequestBody @Valid DerivacionRequestDTO request
@@ -28,6 +30,7 @@ public class DerivacionController {
 
     // ===== VER DERIVACIONES POR TRÁMITE =====
     @GetMapping("/{numeroTramite}")
+    @PreAuthorize("hasAnyRole('MESA_PARTES', 'ADMINISTRADOR')")
     public ResponseEntity<List<DerivacionResponseDTO>> obtenerDerivaciones(
             @PathVariable String numeroTramite
     ) {

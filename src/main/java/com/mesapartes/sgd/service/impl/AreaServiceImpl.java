@@ -3,6 +3,8 @@ package com.mesapartes.sgd.service.impl;
 import com.mesapartes.sgd.dto.AreaRequestDTO;
 import com.mesapartes.sgd.dto.AreaResponseDTO;
 import com.mesapartes.sgd.entity.Area;
+import com.mesapartes.sgd.exception.BusinessException;
+import com.mesapartes.sgd.exception.ResourceNotFoundException;
 import com.mesapartes.sgd.repository.AreaRepository;
 import com.mesapartes.sgd.service.AreaService;
 import lombok.RequiredArgsConstructor;
@@ -20,13 +22,19 @@ public class AreaServiceImpl implements AreaService {
 
     @Override
     public AreaResponseDTO crearArea(AreaRequestDTO request) {
+
         if (areaRepository.existsByNombre(request.getNombre())) {
-            throw new RuntimeException("Ya existe un área con el nombre: " + request.getNombre());
+            throw new BusinessException(
+                    "Ya existe un área con el nombre: " + request.getNombre());
         }
+
         Area area = new Area();
         area.setNombre(request.getNombre());
         area.setDescripcion(request.getDescripcion());
-        return mapearRespuesta(areaRepository.save(area));
+
+        Area guardada = areaRepository.save(area);
+
+        return mapearRespuesta(guardada);
     }
 
     @Override
@@ -39,25 +47,34 @@ public class AreaServiceImpl implements AreaService {
 
     @Override
     public AreaResponseDTO obtenerPorId(UUID id) {
+
         Area area = areaRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Área no encontrada con id: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Área no encontrada con id: " + id));
+
         return mapearRespuesta(area);
     }
 
     @Override
     public void desactivarArea(UUID id) {
+
         Area area = areaRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Área no encontrada con id: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Área no encontrada con id: " + id));
+
         area.setActiva(false);
         areaRepository.save(area);
     }
 
     private AreaResponseDTO mapearRespuesta(Area area) {
+
         AreaResponseDTO response = new AreaResponseDTO();
+
         response.setId(area.getId());
         response.setNombre(area.getNombre());
         response.setDescripcion(area.getDescripcion());
         response.setActiva(area.isActiva());
+
         return response;
     }
 }

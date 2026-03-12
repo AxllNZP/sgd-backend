@@ -5,9 +5,12 @@ import com.mesapartes.sgd.dto.PreguntaSeguridadResponseDTO;
 import com.mesapartes.sgd.dto.RecuperacionSolicitarDTO;
 import com.mesapartes.sgd.dto.RecuperacionVerificarCodigoDTO;
 import com.mesapartes.sgd.dto.VerificarPreguntaDTO;
+import com.mesapartes.sgd.security.RateLimitService;
 import com.mesapartes.sgd.service.RecuperacionPasswordService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,13 +20,25 @@ import org.springframework.web.bind.annotation.*;
 public class RecuperacionPasswordController {
 
     private final RecuperacionPasswordService recuperacionService;
+    private final RateLimitService rateLimitService;
 
     // ===== PASO 1: SOLICITAR RECUPERACIÓN =====
     // POST /api/auth/recuperar/solicitar
     @PostMapping("/solicitar")
     public ResponseEntity<Void> solicitarRecuperacion(
+            HttpServletRequest httpRequest,
             @RequestBody @Valid RecuperacionSolicitarDTO request
     ) {
+
+        String ip = httpRequest.getRemoteAddr();
+
+        if (!rateLimitService.tryConsume(ip)) {
+            return ResponseEntity
+                    .status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header("Retry-After", "900")
+                    .build();
+        }
+
         recuperacionService.solicitarRecuperacion(request);
         return ResponseEntity.ok().build();
     }

@@ -1,7 +1,10 @@
 package com.mesapartes.sgd.service.impl;
 
 import com.mesapartes.sgd.dto.*;
-import com.mesapartes.sgd.entity.*;
+import com.mesapartes.sgd.entity.ContactoNotificacion;
+import com.mesapartes.sgd.entity.PersonaJuridica;
+import com.mesapartes.sgd.entity.PersonaNatural;
+import com.mesapartes.sgd.entity.RolUsuario;
 import com.mesapartes.sgd.repository.PersonaJuridicaRepository;
 import com.mesapartes.sgd.repository.PersonaNaturalRepository;
 import com.mesapartes.sgd.service.EmailService;
@@ -10,6 +13,11 @@ import com.mesapartes.sgd.service.RegistroCiudadanoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.ApplicationEventPublisher;
+
+import java.security.SecureRandom;
 
 import java.time.LocalDateTime;
 import java.util.Random;
@@ -23,28 +31,174 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
     private final JwtService jwtService;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
-    // Tiempo de validez del código: 10 minutos (como dice la guía)
+
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final int MINUTOS_EXPIRACION = 10;
+    private static final int INTENTOS_MAXIMOS = 3;
 
-    // ===== REGISTRAR PERSONA NATURAL =====
+
+    // ===== REGISTRAR NATURAL =====
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public RegistroResponseDTO registrarNatural(RegistroNaturalRequestDTO request) {
 
-        // Validar que no exista el documento
-        if (naturalRepo.existsByNumeroDocumento(request.getNumeroDocumento())) {
-            throw new RuntimeException("Ya existe una cuenta con el documento: "
-                    + request.getNumeroDocumento());
+        validarDocumentoUnico(request.getNumeroDocumento());
+        validarEmailUnico(request.getEmail());
+        PersonaNatural persona = construirPersonaNatural(request);
+        asignarCodigoVerificacion(persona);
+        PersonaNatural guardada = naturalRepo.save(persona);
+        applicationEventPublisher.publishEvent(
+                new com.mesapartes.sgd.event.CodigoVerificacionEvent(this, guardada, null)
+        );
+
+        return new RegistroResponseDTO(
+                "Registro exitoso. Revise su correo para activar su cuenta.",
+                persona.getNumeroDocumento(),
+                "NATURAL",
+                true
+        );
+    }
+
+    // ===== REGISTRAR JURIDICA =====
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RegistroResponseDTO registrarJuridica(RegistroJuridicaRequestDTO request) {
+        validarRucUnico(request.getRuc());
+        PersonaJuridica empresa = construirPersonaJuridica(request);
+        asignarCodigoVerificacion(empresa);
+        PersonaJuridica guardada = juridicaRepo.save(empresa);
+        agregarContactosNotificacion(guardada, request);
+        juridicaRepo.save(guardada);
+
+        applicationEventPublisher.publishEvent(
+                new com.mesapartes.sgd.event.CodigoVerificacionEvent(this, null, guardada)
+        );
+
+        return new RegistroResponseDTO(
+                "Registro exitoso. Revise el correo del representante legal para activar la cuenta.",
+                guardada.getRuc(),
+                "JURIDICA",
+                true
+        );
+    }
+
+    // ===== VERIFICAR CODIGO =====
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void verificarCodigo(VerificacionCodigoDTO request) {
+
+        String tipo = request.getTipoPersna().toUpperCase();
+
+        if ("NATURAL".equals(tipo)) {
+
+            PersonaNatural persona = obtenerPersonaNatural(request.getIdentificador());
+
+            validarYActivarCodigo(
+                    persona.getCodigoVerificacion(),
+                    persona.getCodigoExpiracion(),
+                    persona.isVerificado(),
+                    request.getCodigo()
+            );
+
+            activarCuentaNatural(persona);
+
+        } else if ("JURIDICA".equals(tipo)) {
+
+            PersonaJuridica empresa = obtenerPersonaJuridica(request.getIdentificador());
+
+            validarYActivarCodigo(
+                    empresa.getCodigoVerificacion(),
+                    empresa.getCodigoExpiracion(),
+                    empresa.isVerificado(),
+                    request.getCodigo()
+            );
+
+            activarCuentaJuridica(empresa);
+
+        } else {
+            throw new RuntimeException("Tipo de persona inválido: " + tipo);
         }
 
-        // Validar que no exista el email
-        if (naturalRepo.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Ya existe una cuenta con el email: "
-                    + request.getEmail());
-        }
+    }
 
-        // Construir entidad
+    // ===== REENVIAR CODIGO =====
+    @Override
+    public void reenviarCodigo(String tipoPersna, String identificador) {
+
+        String tipo = tipoPersna.toUpperCase();
+
+        if ("NATURAL".equals(tipo)) {
+
+            PersonaNatural persona = obtenerPersonaNatural(identificador);
+
+            validarNoVerificado(persona.isVerificado());
+
+            asignarCodigoVerificacion(persona);
+            naturalRepo.save(persona);
+
+            enviarCodigoNatural(persona);
+
+        } else if ("JURIDICA".equals(tipo)) {
+
+            PersonaJuridica empresa = obtenerPersonaJuridica(identificador);
+
+            validarNoVerificado(empresa.isVerificado());
+
+            asignarCodigoVerificacion(empresa);
+            juridicaRepo.save(empresa);
+
+            enviarCodigoJuridica(empresa);
+
+        } else {
+            throw new RuntimeException("Tipo de persona inválido: " + tipo);
+        }
+    }
+
+    // ===== LOGIN =====
+    @Override
+    public LoginResponseDTO loginCiudadano(LoginCiudadanoRequestDTO request) {
+
+        String tipo = request.getTipoPersna().toUpperCase();
+
+        if ("NATURAL".equals(tipo)) {
+
+            PersonaNatural persona = obtenerPersonaNatural(request.getIdentificador());
+
+            validarLogin(
+                    persona.isVerificado(),
+                    persona.isActivo(),
+                    request.getPassword(),
+                    persona.getPassword()
+            );
+
+            return generarLoginNatural(persona);
+
+        } else if ("JURIDICA".equals(tipo)) {
+
+            PersonaJuridica empresa = obtenerPersonaJuridica(request.getIdentificador());
+
+            validarLogin(
+                    empresa.isVerificado(),
+                    empresa.isActivo(),
+                    request.getPassword(),
+                    empresa.getPassword()
+            );
+
+            return generarLoginJuridica(empresa);
+
+        } else {
+            throw new RuntimeException("Tipo de persona inválido: " + tipo);
+        }
+    }
+
+    // ===== METODOS PRIVADOS =====
+
+    private PersonaNatural construirPersonaNatural(RegistroNaturalRequestDTO request) {
+
         PersonaNatural persona = new PersonaNatural();
+
         persona.setTipoDocumento(request.getTipoDocumento());
         persona.setNumeroDocumento(request.getNumeroDocumento());
         persona.setNombres(request.getNombres());
@@ -58,53 +212,22 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
         persona.setEmail(request.getEmail());
         persona.setPassword(passwordEncoder.encode(request.getPassword()));
         persona.setPreguntaSeguridad(request.getPreguntaSeguridad());
-        persona.setRespuestaSeguridad(
-                request.getRespuestaSeguridad().trim().toLowerCase()
-        );
+        persona.setRespuestaSeguridad(request.getRespuestaSeguridad().trim().toLowerCase());
         persona.setAfiliadoBuzon(request.isAfiliadoBuzon());
 
-        // Generar y asignar código de verificación
-        String codigo = generarCodigo();
-        persona.setCodigoVerificacion(codigo);
-        persona.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
-
-        naturalRepo.save(persona);
-
-        // Enviar email con código
-        emailService.enviarCodigoVerificacion(
-                persona.getEmail(),
-                persona.getNombres() + " " + persona.getApellidoPaterno(),
-                codigo
-        );
-
-        return new RegistroResponseDTO(
-                "Registro exitoso. Revise su correo para activar su cuenta.",
-                persona.getNumeroDocumento(),
-                "NATURAL",
-                true
-        );
+        return persona;
     }
 
-    // ===== REGISTRAR PERSONA JURÍDICA =====
-    @Override
-    public RegistroResponseDTO registrarJuridica(RegistroJuridicaRequestDTO request) {
+    private PersonaJuridica construirPersonaJuridica(RegistroJuridicaRequestDTO request) {
 
-        // Validar RUC
-        if (juridicaRepo.existsByRuc(request.getRuc())) {
-            throw new RuntimeException("Ya existe una cuenta con el RUC: " + request.getRuc());
-        }
-
-        // Construir entidad
         PersonaJuridica empresa = new PersonaJuridica();
+
         empresa.setRuc(request.getRuc());
         empresa.setRazonSocial(request.getRazonSocial());
         empresa.setPassword(passwordEncoder.encode(request.getPassword()));
         empresa.setPreguntaSeguridad(request.getPreguntaSeguridad());
-        empresa.setRespuestaSeguridad(
-                request.getRespuestaSeguridad().trim().toLowerCase()
-        );
+        empresa.setRespuestaSeguridad(request.getRespuestaSeguridad().trim().toLowerCase());
 
-        // Representante legal
         empresa.setTipoDocRepresentante(request.getTipoDocRepresentante());
         empresa.setNumDocRepresentante(request.getNumDocRepresentante());
         empresa.setNombresRepresentante(request.getNombresRepresentante());
@@ -112,233 +235,181 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
         empresa.setApellidoMaternoRepresentante(request.getApellidoMaternoRepresentante());
         empresa.setEmailRepresentante(request.getEmailRepresentante());
 
-        // Ubigeo
         empresa.setDepartamento(request.getDepartamento());
         empresa.setProvincia(request.getProvincia());
         empresa.setDistrito(request.getDistrito());
         empresa.setDireccion(request.getDireccion());
         empresa.setTelefono(request.getTelefono());
-
         empresa.setAfiliadoBuzon(request.isAfiliadoBuzon());
 
-        // Código de verificación
-        String codigo = generarCodigo();
-        empresa.setCodigoVerificacion(codigo);
+        return empresa;
+    }
+
+    private void asignarCodigoVerificacion(PersonaNatural persona) {
+        persona.setCodigoVerificacion(generarCodigo());
+        persona.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+    }
+
+    private void asignarCodigoVerificacion(PersonaJuridica empresa) {
+        empresa.setCodigoVerificacion(generarCodigo());
         empresa.setCodigoExpiracion(LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION));
+    }
 
-        // Guardar empresa primero para obtener el ID
-        PersonaJuridica guardada = juridicaRepo.save(empresa);
-
-        // Agregar contactos de notificación
-        if (request.getContactosNotificacion() != null) {
-            for (ContactoNotificacionDTO contactoDTO : request.getContactosNotificacion()) {
-                ContactoNotificacion contacto = new ContactoNotificacion();
-                contacto.setPersonaJuridica(guardada);
-                contacto.setNombres(contactoDTO.getNombres());
-                contacto.setEmail(contactoDTO.getEmail());
-                contacto.setActivo(contactoDTO.isActivo());
-                guardada.getContactosNotificacion().add(contacto);
-            }
-            juridicaRepo.save(guardada);
-        }
-
-        // Enviar código al email del representante legal
+    private void enviarCodigoNatural(PersonaNatural persona) {
         emailService.enviarCodigoVerificacion(
-                guardada.getEmailRepresentante(),
-                guardada.getRazonSocial(),
-                codigo
-        );
-
-        return new RegistroResponseDTO(
-                "Registro exitoso. Revise el correo del representante legal para activar la cuenta.",
-                guardada.getRuc(),
-                "JURIDICA",
-                true
+                persona.getEmail(),
+                persona.getNombres() + " " + persona.getApellidoPaterno(),
+                persona.getCodigoVerificacion()
         );
     }
 
-    // ===== VERIFICAR CÓDIGO =====
-    @Override
-    public void verificarCodigo(VerificacionCodigoDTO request) {
-        String tipo = request.getTipoPersna().toUpperCase();
+    private void enviarCodigoJuridica(PersonaJuridica empresa) {
+        emailService.enviarCodigoVerificacion(
+                empresa.getEmailRepresentante(),
+                empresa.getRazonSocial(),
+                empresa.getCodigoVerificacion()
+        );
+    }
 
-        if ("NATURAL".equals(tipo)) {
-            PersonaNatural persona = naturalRepo.findByNumeroDocumento(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
-
-            validarYActivarCodigo(
-                    persona.getCodigoVerificacion(),
-                    persona.getCodigoExpiracion(),
-                    persona.isVerificado(),
-                    request.getCodigo()
-            );
-
-            persona.setVerificado(true);
-            persona.setActivo(true);
-            persona.setCodigoVerificacion(null);
-            persona.setCodigoExpiracion(null);
-            naturalRepo.save(persona);
-
-        } else if ("JURIDICA".equals(tipo)) {
-            PersonaJuridica empresa = juridicaRepo.findByRuc(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
-
-            validarYActivarCodigo(
-                    empresa.getCodigoVerificacion(),
-                    empresa.getCodigoExpiracion(),
-                    empresa.isVerificado(),
-                    request.getCodigo()
-            );
-
-            empresa.setVerificado(true);
-            empresa.setActivo(true);
-            empresa.setCodigoVerificacion(null);
-            empresa.setCodigoExpiracion(null);
-            juridicaRepo.save(empresa);
-
-        } else {
-            throw new RuntimeException("Tipo de persona inválido: " + tipo);
+    private void validarDocumentoUnico(String documento) {
+        if (naturalRepo.existsByNumeroDocumento(documento)) {
+            throw new RuntimeException("Ya existe una cuenta con el documento: " + documento);
         }
     }
 
-    // ===== REENVIAR CÓDIGO =====
-    @Override
-    public void reenviarCodigo(String tipoPersna, String identificador) {
-        String tipo = tipoPersna.toUpperCase();
-        String nuevoCodigo = generarCodigo();
-        LocalDateTime nuevaExpiracion = LocalDateTime.now().plusMinutes(MINUTOS_EXPIRACION);
-
-        if ("NATURAL".equals(tipo)) {
-            PersonaNatural persona = naturalRepo.findByNumeroDocumento(identificador)
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
-
-            if (persona.isVerificado()) {
-                throw new RuntimeException("Esta cuenta ya fue verificada");
-            }
-
-            persona.setCodigoVerificacion(nuevoCodigo);
-            persona.setCodigoExpiracion(nuevaExpiracion);
-            naturalRepo.save(persona);
-
-            emailService.enviarCodigoVerificacion(
-                    persona.getEmail(),
-                    persona.getNombres() + " " + persona.getApellidoPaterno(),
-                    nuevoCodigo
-            );
-
-        } else if ("JURIDICA".equals(tipo)) {
-            PersonaJuridica empresa = juridicaRepo.findByRuc(identificador)
-                    .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
-
-            if (empresa.isVerificado()) {
-                throw new RuntimeException("Esta cuenta ya fue verificada");
-            }
-
-            empresa.setCodigoVerificacion(nuevoCodigo);
-            empresa.setCodigoExpiracion(nuevaExpiracion);
-            juridicaRepo.save(empresa);
-
-            emailService.enviarCodigoVerificacion(
-                    empresa.getEmailRepresentante(),
-                    empresa.getRazonSocial(),
-                    nuevoCodigo
-            );
-
-        } else {
-            throw new RuntimeException("Tipo de persona inválido: " + tipo);
+    private void validarEmailUnico(String email) {
+        if (naturalRepo.existsByEmail(email)) {
+            throw new RuntimeException("Ya existe una cuenta con el email: " + email);
         }
     }
 
-    // ===== LOGIN CIUDADANO =====
-    @Override
-    public LoginResponseDTO loginCiudadano(LoginCiudadanoRequestDTO request) {
-        String tipo = request.getTipoPersna().toUpperCase();
-
-        if ("NATURAL".equals(tipo)) {
-            PersonaNatural persona = naturalRepo
-                    .findByNumeroDocumento(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Credenciales incorrectas"));
-
-            if (!persona.isVerificado()) {
-                throw new RuntimeException("Cuenta no verificada. Revise su correo.");
-            }
-
-            if (!persona.isActivo()) {
-                throw new RuntimeException("Cuenta desactivada. Contacte al administrador.");
-            }
-
-            if (!passwordEncoder.matches(request.getPassword(), persona.getPassword())) {
-                throw new RuntimeException("Credenciales incorrectas");
-            }
-
-            String token = jwtService.generarToken(
-                    persona.getEmail(),
-                    RolUsuario.CIUDADANO.name()
-            );
-
-            return new LoginResponseDTO(
-                    token,
-                    persona.getEmail(),
-                    RolUsuario.CIUDADANO.name(),
-                    persona.getNombres() + " " + persona.getApellidoPaterno()
-            );
-
-        } else if ("JURIDICA".equals(tipo)) {
-            PersonaJuridica empresa = juridicaRepo
-                    .findByRuc(request.getIdentificador())
-                    .orElseThrow(() -> new RuntimeException("Credenciales incorrectas"));
-
-            if (!empresa.isVerificado()) {
-                throw new RuntimeException("Cuenta no verificada. Revise su correo.");
-            }
-
-            if (!empresa.isActivo()) {
-                throw new RuntimeException("Cuenta desactivada. Contacte al administrador.");
-            }
-
-            if (!passwordEncoder.matches(request.getPassword(), empresa.getPassword())) {
-                throw new RuntimeException("Credenciales incorrectas");
-            }
-
-            String token = jwtService.generarToken(
-                    empresa.getEmailRepresentante(),
-                    RolUsuario.CIUDADANO.name()
-            );
-
-            return new LoginResponseDTO(
-                    token,
-                    empresa.getEmailRepresentante(),
-                    RolUsuario.CIUDADANO.name(),
-                    empresa.getRazonSocial()
-            );
-
-        } else {
-            throw new RuntimeException("Tipo de persona inválido: " + tipo);
+    private void validarRucUnico(String ruc) {
+        if (juridicaRepo.existsByRuc(ruc)) {
+            throw new RuntimeException("Ya existe una cuenta con el RUC: " + ruc);
         }
     }
 
-    // ===== MÉTODOS PRIVADOS =====
+    private PersonaNatural obtenerPersonaNatural(String documento) {
+        return naturalRepo.findByNumeroDocumento(documento)
+                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+    }
+
+    private PersonaJuridica obtenerPersonaJuridica(String ruc) {
+        return juridicaRepo.findByRuc(ruc)
+                .orElseThrow(() -> new RuntimeException("Cuenta no encontrada"));
+    }
+
+    private void validarNoVerificado(boolean verificado) {
+        if (verificado) {
+            throw new RuntimeException("Esta cuenta ya fue verificada");
+        }
+    }
+
+    private void validarLogin(boolean verificado, boolean activo, String passwordIngresado, String passwordGuardado) {
+
+        if (!verificado) {
+            throw new RuntimeException("Cuenta no verificada. Revise su correo.");
+        }
+
+        if (!activo) {
+            throw new RuntimeException("Cuenta desactivada. Contacte al administrador.");
+        }
+
+        if (!passwordEncoder.matches(passwordIngresado, passwordGuardado)) {
+            throw new RuntimeException("Credenciales incorrectas");
+        }
+    }
+
+    private LoginResponseDTO generarLoginNatural(PersonaNatural persona) {
+
+        String token = jwtService.generarToken(
+                persona.getEmail(),
+                RolUsuario.CIUDADANO.name()
+        );
+
+        return new LoginResponseDTO(
+                token,
+                persona.getEmail(),
+                RolUsuario.CIUDADANO.name(),
+                persona.getNombres() + " " + persona.getApellidoPaterno()
+        );
+    }
+
+    private LoginResponseDTO generarLoginJuridica(PersonaJuridica empresa) {
+
+        String token = jwtService.generarToken(
+                empresa.getEmailRepresentante(),
+                RolUsuario.CIUDADANO.name()
+        );
+
+        return new LoginResponseDTO(
+                token,
+                empresa.getEmailRepresentante(),
+                RolUsuario.CIUDADANO.name(),
+                empresa.getRazonSocial()
+        );
+    }
 
     private String generarCodigo() {
-        // Genera un código numérico de 6 dígitos
-        Random random = new Random();
-        int numero = 100000 + random.nextInt(900000);
-        return String.valueOf(numero);
+        int codigo = 10_000_000 + SECURE_RANDOM.nextInt(90_000_000);
+        return String.valueOf(codigo);
     }
 
     private void validarYActivarCodigo(String codigoGuardado, LocalDateTime expiracion,
                                        boolean yaVerificado, String codigoIngresado) {
+
         if (yaVerificado) {
             throw new RuntimeException("Esta cuenta ya fue verificada anteriormente");
         }
+
         if (codigoGuardado == null) {
             throw new RuntimeException("No hay un código de verificación activo");
         }
+
         if (LocalDateTime.now().isAfter(expiracion)) {
             throw new RuntimeException("El código ha expirado. Solicite uno nuevo.");
         }
+
         if (!codigoGuardado.equals(codigoIngresado)) {
             throw new RuntimeException("El código ingresado es incorrecto");
         }
     }
+
+    private void activarCuentaNatural(PersonaNatural persona) {
+        persona.setVerificado(true);
+        persona.setActivo(true);
+        persona.setCodigoVerificacion(null);
+        persona.setCodigoExpiracion(null);
+        naturalRepo.save(persona);
+    }
+
+    private void activarCuentaJuridica(PersonaJuridica empresa) {
+        empresa.setVerificado(true);
+        empresa.setActivo(true);
+        empresa.setCodigoVerificacion(null);
+        empresa.setCodigoExpiracion(null);
+        juridicaRepo.save(empresa);
+    }
+
+    private void agregarContactosNotificacion(PersonaJuridica empresa,
+                                              RegistroJuridicaRequestDTO request) {
+
+        if (request.getContactosNotificacion() == null) return;
+
+        for (ContactoNotificacionDTO contactoDTO : request.getContactosNotificacion()) {
+
+            ContactoNotificacion contacto = new ContactoNotificacion();
+
+            contacto.setPersonaJuridica(empresa);
+            contacto.setNombres(contactoDTO.getNombres());
+            contacto.setEmail(contactoDTO.getEmail());
+            contacto.setActivo(contactoDTO.isActivo());
+
+            empresa.getContactosNotificacion().add(contacto);
+        }
+
+        juridicaRepo.save(empresa);
+    }
+
+
 }
