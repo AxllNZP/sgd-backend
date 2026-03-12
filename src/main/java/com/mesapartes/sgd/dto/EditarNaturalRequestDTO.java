@@ -26,4 +26,6 @@ public class EditarNaturalRequestDTO {
 
     @NotBlank(message = "La respuesta de seguridad es obligatoria")
     private String respuestaSeguridad;
+
+    
 }
