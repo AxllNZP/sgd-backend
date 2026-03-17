@@ -7,6 +7,8 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface PersonaNaturalRepository extends JpaRepository<PersonaNatural, UUID> {
@@ -22,4 +24,22 @@ public interface PersonaNaturalRepository extends JpaRepository<PersonaNatural, 
     // Para login: busca por tipo + número de documento
     Optional<PersonaNatural> findByTipoDocumentoAndNumeroDocumento(
             TipoDocumento tipoDocumento, String numeroDocumento);
+
+    // Búsqueda dinámica por nombre, documento o email (case-insensitive)
+    Page<PersonaNatural> findByNombresContainingIgnoreCaseOrNumeroDocumentoContainingIgnoreCaseOrEmailContainingIgnoreCase(
+            String nombres, String numeroDocumento, String email, Pageable pageable);
+
+    // Con filtro de estado
+    Page<PersonaNatural> findByActivo(boolean activo, Pageable pageable);
+
+    // Búsqueda + filtro de estado
+    Page<PersonaNatural> findByActivoAndNombresContainingIgnoreCaseOrActivoAndNumeroDocumentoContainingIgnoreCaseOrActivoAndEmailContainingIgnoreCase(
+            boolean activo1, String nombres,
+            boolean activo2, String numeroDocumento,
+            boolean activo3, String email,
+            Pageable pageable);
+
+    // Conteos para estadísticas
+    long countByActivo(boolean activo);
+    long countByVerificado(boolean verificado);
 }

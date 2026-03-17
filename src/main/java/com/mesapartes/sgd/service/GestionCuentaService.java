@@ -36,6 +36,6 @@ public interface GestionCuentaService {
     List<ContactoNotificacionResponseDTO> listarContactos(String ruc);
 
     // CAMBIO DE CONTRASEÑA
-    @PreAuthorize("#request.numeroDocumento == authentication.name or hasRole('ADMINISTRADOR')")
+    @PreAuthorize("#request.identificador == authentication.name or hasRole('ADMINISTRADOR')")
     void cambiarPassword(CambiarPasswordRequestDTO request);
 }

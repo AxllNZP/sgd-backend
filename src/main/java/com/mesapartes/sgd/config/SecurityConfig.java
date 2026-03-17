@@ -42,6 +42,10 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
 
+                        // ===== ADMIN CIUDADANOS =====
+                        .requestMatchers("/api/admin/**")
+                        .hasRole("ADMINISTRADOR")
+
                         // ===== AUTH =====
                         .requestMatchers("/api/auth/**").permitAll()
 

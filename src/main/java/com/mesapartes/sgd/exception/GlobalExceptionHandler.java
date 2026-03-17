@@ -6,6 +6,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import com.mesapartes.sgd.exception.BadRequestException;
+import com.mesapartes.sgd.exception.BusinessException;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -103,5 +106,60 @@ public class GlobalExceptionHandler {
         );
 
         return ResponseEntity.status(status).body(error);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiErrorResponse> handleMessageNotReadable(
+            HttpMessageNotReadableException ex,
+            HttpServletRequest request) {
+
+        String mensaje = "Datos de entrada inválidos. Verifique los campos enviados.";
+
+        // Extraer el campo problemático del mensaje de Jackson si es posible
+        String exMsg = ex.getMessage();
+        if (exMsg != null && exMsg.contains("TipoDocumento")) {
+            mensaje = "Tipo de documento inválido. Use: DNI o CARNET_EXTRANJERIA.";
+        } else if (exMsg != null && exMsg.contains("PreguntaSeguridad")) {
+            mensaje = "Pregunta de seguridad inválida.";
+        }
+
+        return buildResponse(HttpStatus.BAD_REQUEST, mensaje, request.getRequestURI());
+    }
+
+    // ===== BAD REQUEST (BadRequestException lanzada desde servicios) =====
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<ApiErrorResponse> handleBadRequest(
+            BadRequestException ex,
+            HttpServletRequest request) {
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage(), request.getRequestURI());
+    }
+
+    // ===== BUSINESS EXCEPTION (error lógico de negocio) =====
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiErrorResponse> handleBusiness(
+            BusinessException ex,
+            HttpServletRequest request) {
+        return buildResponse(
+                HttpStatus.UNPROCESSABLE_ENTITY,  // 422 — más preciso que 500
+                ex.getMessage(),
+                request.getRequestURI()
+        );
+    }
+
+    // ===== RUNTIME EXCEPTION (errores de lógica no tipados) =====
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<ApiErrorResponse> handleRuntime(
+            RuntimeException ex,
+            HttpServletRequest request) {
+        // Errores de negocio descriptivos (verificación, código expirado, etc.)
+        String msg = ex.getMessage();
+        if (msg != null && !msg.isBlank()) {
+            return buildResponse(HttpStatus.BAD_REQUEST, msg, request.getRequestURI());
+        }
+        return buildResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Error interno del servidor",
+                request.getRequestURI()
+        );
     }
 }

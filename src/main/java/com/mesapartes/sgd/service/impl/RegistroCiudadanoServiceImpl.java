@@ -25,6 +25,8 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Random;
 
+import static com.mesapartes.sgd.service.impl.EmailServiceImpl.log;
+
 @Service
 @RequiredArgsConstructor
 public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
@@ -127,6 +129,8 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
     }
 
     // ===== REENVIAR CODIGO =====
+    // RegistroCiudadanoServiceImpl.java — método reenviarCodigo()
+
     @Override
     public void reenviarCodigo(String tipoPersna, String identificador) {
 
@@ -135,24 +139,33 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
         if ("NATURAL".equals(tipo)) {
 
             PersonaNatural persona = obtenerPersonaNatural(identificador);
-
             validarNoVerificado(persona.isVerificado());
-
             asignarCodigoVerificacion(persona);
-            naturalRepo.save(persona);
+            naturalRepo.save(persona);  // ← código guardado en DB ✅
 
-            enviarCodigoNatural(persona);
+            // CORRECCIÓN: try-catch para que el fallo de SMTP no rompa el flujo
+            // El código está en DB — el usuario puede verificarlo si recibe el email
+            try {
+                enviarCodigoNatural(persona);
+            } catch (Exception e) {
+                log.warn("[REENVIO] Código guardado pero email falló para {}: {}",
+                        identificador, e.getMessage());
+                // No relanzar — el código fue guardado exitosamente
+            }
 
         } else if ("JURIDICA".equals(tipo)) {
 
             PersonaJuridica empresa = obtenerPersonaJuridica(identificador);
-
             validarNoVerificado(empresa.isVerificado());
-
             asignarCodigoVerificacion(empresa);
-            juridicaRepo.save(empresa);
+            juridicaRepo.save(empresa);  // ← código guardado en DB ✅
 
-            enviarCodigoJuridica(empresa);
+            try {
+                enviarCodigoJuridica(empresa);
+            } catch (Exception e) {
+                log.warn("[REENVIO] Código guardado pero email falló para {}: {}",
+                        identificador, e.getMessage());
+            }
 
         } else {
             throw new RuntimeException("Tipo de persona inválido: " + tipo);
@@ -326,7 +339,7 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
     private LoginResponseDTO generarLoginNatural(PersonaNatural persona) {
 
         String token = jwtService.generarToken(
-                persona.getEmail(),
+                persona.getNumeroDocumento(),
                 RolUsuario.CIUDADANO.name()
         );
 
@@ -347,7 +360,7 @@ public class RegistroCiudadanoServiceImpl implements RegistroCiudadanoService {
 
         return new LoginResponseDTO(
                 token,
-                empresa.getEmailRepresentante(),
+                empresa.getRuc(),
                 RolUsuario.CIUDADANO.name(),
                 empresa.getRazonSocial()
         );

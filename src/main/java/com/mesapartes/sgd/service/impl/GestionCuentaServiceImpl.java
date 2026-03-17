@@ -56,6 +56,10 @@ public class GestionCuentaServiceImpl implements GestionCuentaService {
                 .orElseThrow(() ->
                         new ResourceNotFoundException("Cuenta natural", numeroDocumento));
 
+        if (!persona.getRespuestaSeguridad().trim().toLowerCase()
+                .equals(request.getRespuestaSeguridad().trim().toLowerCase())) {
+            throw new BusinessConflictException("La respuesta de seguridad es incorrecta");
+        }
         validarEmail(request.getEmail());
 
         // Verificar duplicidad email

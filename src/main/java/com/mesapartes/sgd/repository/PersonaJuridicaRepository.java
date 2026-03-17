@@ -6,6 +6,8 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface PersonaJuridicaRepository extends JpaRepository<PersonaJuridica, UUID> {
@@ -16,4 +18,13 @@ public interface PersonaJuridicaRepository extends JpaRepository<PersonaJuridica
 
     // Para login: busca por RUC
     Optional<PersonaJuridica> findByRucAndActivoTrue(String ruc);
+
+    Page<PersonaJuridica> findByRucContainingIgnoreCaseOrRazonSocialContainingIgnoreCaseOrEmailRepresentanteContainingIgnoreCase(
+            String ruc, String razonSocial, String email, Pageable pageable);
+
+    Page<PersonaJuridica> findByActivo(boolean activo, Pageable pageable);
+
+    long countByActivo(boolean activo);
+    long countByVerificado(boolean verificado);
+
 }

@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class EmailServiceImpl implements EmailService {
 
-    private static final Logger log = LoggerFactory.getLogger(EmailServiceImpl.class);
+    protected static final Logger log = LoggerFactory.getLogger(EmailServiceImpl.class);
 
     private static final Pattern EMAIL_PATTERN =
             Pattern.compile("^[A-Za-z0-9+_.-]+@(.+)$");

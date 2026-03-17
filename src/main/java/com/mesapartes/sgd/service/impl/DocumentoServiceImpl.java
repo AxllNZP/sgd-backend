@@ -136,76 +136,9 @@ public class DocumentoServiceImpl implements DocumentoService {
         applicationEventPublisher.publishEvent(
                 new com.mesapartes.sgd.event.DocumentoRegistradoEvent(this, guardado, request)
         );
-        // ===== ENVIAR NOTIFICACIONES POR EMAIL =====
-        enviarNotificaciones(guardado, request);
 
 
         return mapearRespuesta(guardado);
-    }
-
-    // ===== ENVIAR NOTIFICACIONES =====
-    private void enviarNotificaciones(Documento documento, DocumentoRequestDTO request) {
-        String tipo = request.getTipoPersona().toUpperCase();
-
-        if ("NATURAL".equals(tipo)) {
-            // Email principal del remitente
-            if (request.getEmailRemitente() != null
-                    && !request.getEmailRemitente().isEmpty()) {
-                emailService.enviarConfirmacionExpediente(
-                        request.getEmailRemitente(),
-                        request.getRemitente(),
-                        documento.getNumeroTramite(),
-                        request.getAsunto(),
-                        request.getTipoDocumento(),
-                        request.getNumeroFolios()
-                );
-            }
-
-            // Email adicional (copia)
-            if (request.getEmailNotificacionAdicional() != null
-                    && !request.getEmailNotificacionAdicional().isEmpty()) {
-                emailService.enviarConfirmacionExpediente(
-                        request.getEmailNotificacionAdicional(),
-                        request.getRemitente(),
-                        documento.getNumeroTramite(),
-                        request.getAsunto(),
-                        request.getTipoDocumento(),
-                        request.getNumeroFolios()
-                );
-            }
-
-        } else if ("JURIDICA".equals(tipo)) {
-            // Email del representante legal
-            if (request.getEmailRemitente() != null
-                    && !request.getEmailRemitente().isEmpty()) {
-                emailService.enviarConfirmacionExpediente(
-                        request.getEmailRemitente(),
-                        request.getRemitente(),
-                        documento.getNumeroTramite(),
-                        request.getAsunto(),
-                        request.getTipoDocumento(),
-                        request.getNumeroFolios()
-                );
-            }
-
-            // Contactos de notificación seleccionados
-            if (request.getContactosNotificacionIds() != null) {
-                for (UUID contactoId : request.getContactosNotificacionIds()) {
-                    contactoRepo.findById(contactoId).ifPresent(contacto -> {
-                        if (contacto.isActivo()) {
-                            emailService.enviarConfirmacionExpediente(
-                                    contacto.getEmail(),
-                                    request.getRemitente(),
-                                    documento.getNumeroTramite(),
-                                    request.getAsunto(),
-                                    request.getTipoDocumento(),
-                                    request.getNumeroFolios()
-                            );
-                        }
-                    });
-                }
-            }
-        }
     }
 
     // ===== CONSULTAR POR NÚMERO DE TRÁMITE =====
