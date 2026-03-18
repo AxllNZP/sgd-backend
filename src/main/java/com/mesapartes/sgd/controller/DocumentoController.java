@@ -146,7 +146,7 @@ public class DocumentoController {
         int safeSize = Math.min(size, 100);
         Pageable pageable = PageRequest.of(page, safeSize, Sort.by(sortBy).descending());
         return ResponseEntity.ok(documentoService.buscarPorFiltros(filtro, pageable));
-    }   
+    }
 
     @Operation(summary = "Asignar área al documento",
             description = "Requiere rol MESA_PARTES o ADMINISTRADOR.")
