@@ -1,8 +1,10 @@
 package com.mesapartes.sgd.config;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -15,13 +17,23 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.http.HttpMethod;
-import org.springframework.beans.factory.annotation.Value;
-import java.util.Arrays;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 
+import java.util.Arrays;
 import java.util.List;
 
+// =============================================================
+// SecurityConfig.java
+// CORRECCIÓN: línea de Swagger movida ANTES de anyRequest().
+//
+// ¿Por qué fallaba?
+//   Spring Security construye la cadena de reglas de arriba
+//   hacia abajo. Una vez que encuentra anyRequest(), considera
+//   que la configuración está "cerrada" y no acepta más reglas.
+//   Agregar requestMatchers() después lanza:
+//   "Can't configure mvcMatchers after anyRequest"
+//
+// Regla de oro: anyRequest() SIEMPRE es la ÚLTIMA regla.
+// =============================================================
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity(prePostEnabled = true)
@@ -29,6 +41,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
+
     @Value("${cors.allowed-origins}")
     private String allowedOrigins;
 
@@ -42,6 +55,15 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
 
+                        // ===== SWAGGER UI — debe ir antes de anyRequest =====
+                        // Permite acceso público a la documentación de la API
+                        .requestMatchers(
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/v3/api-docs/**",
+                                "/v3/api-docs"
+                        ).permitAll()
+
                         // ===== ADMIN CIUDADANOS =====
                         .requestMatchers("/api/admin/**")
                         .hasRole("ADMINISTRADOR")
@@ -49,32 +71,18 @@ public class SecurityConfig {
                         // ===== AUTH =====
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // ===== DOCUMENTOS PUBLICOS =====
-                        // Registro de documento
+                        // ===== DOCUMENTOS PÚBLICOS =====
                         .requestMatchers(HttpMethod.POST, "/api/documentos").permitAll()
-
-                        // Consulta pública por número de trámite
                         .requestMatchers(HttpMethod.GET, "/api/documentos/*").permitAll()
-
-                        // Cargo público
                         .requestMatchers(HttpMethod.GET, "/api/documentos/*/cargo").permitAll()
 
                         // ===== OPERACIONES INTERNAS =====
-
-                        // Listado completo
                         .requestMatchers(HttpMethod.GET, "/api/documentos").authenticated()
-
-                        // Cambio de estado
                         .requestMatchers("/api/documentos/*/estado")
                         .hasAnyRole("MESA_PARTES", "ADMINISTRADOR")
-
-                        // Asignación de área
                         .requestMatchers("/api/documentos/*/area/**")
                         .hasAnyRole("MESA_PARTES", "ADMINISTRADOR")
-
-                        // Descarga de archivos internos
-                        .requestMatchers("/api/documentos/*/descargar**")
-                        .authenticated()
+                        .requestMatchers("/api/documentos/*/descargar**").authenticated()
 
                         // ===== DERIVACIONES =====
                         .requestMatchers("/api/derivaciones/**")
@@ -95,7 +103,7 @@ public class SecurityConfig {
                         // ===== CUENTA =====
                         .requestMatchers("/api/cuenta/**").authenticated()
 
-                        // cualquier otro endpoint
+                        // ← anyRequest SIEMPRE al final — regla de cierre
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
@@ -105,33 +113,15 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-
         CorsConfiguration config = new CorsConfiguration();
-
         List<String> origins = Arrays.asList(allowedOrigins.split(","));
         config.setAllowedOrigins(origins);
-
-        config.setAllowedMethods(List.of(
-                "GET",
-                "POST",
-                "PUT",
-                "PATCH",
-                "DELETE",
-                "OPTIONS"
-        ));
-
-        config.setAllowedHeaders(List.of(
-                "Authorization",
-                "Content-Type",
-                "Accept"
-        ));
-
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
-
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
-
         return source;
     }
 
