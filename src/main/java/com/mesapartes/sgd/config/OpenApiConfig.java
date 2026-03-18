@@ -8,18 +8,44 @@ import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
+import org.springdoc.core.utils.SpringDocUtils;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.List;
 
 // =============================================================
-// OpenApiConfig — Swagger UI disponible en:
-//   http://localhost:8080/swagger-ui/index.html
-//   http://localhost:8080/v3/api-docs (JSON crudo)
+// OpenApiConfig.java — VERSIÓN CORREGIDA
+//
+// PROBLEMA RAÍZ DEL 500:
+//   SpringDoc no puede serializar org.springframework.data.domain.Pageable
+//   (es una interfaz con métodos internos complejos). Al encontrarla en los
+//   controllers que retornan Page<T>, intenta introspectarla → NullPointerException → 500.
+//
+// SOLUCIÓN:
+//   SpringDocUtils.replaceWithClass() le indica a SpringDoc que sustituya
+//   Pageable por nuestra clase simple PageableDocHelper, que tiene solo
+//   3 campos planos (page, size, sort) que SÍ puede serializar.
 // =============================================================
 @Configuration
 public class OpenApiConfig {
+
+    static {
+        // Este bloque static se ejecuta cuando Spring carga la clase,
+        // ANTES del escaneo de controllers — es el momento correcto.
+        SpringDocUtils.getConfig().replaceWithClass(
+                org.springframework.data.domain.Pageable.class,
+                PageableDocHelper.class
+        );
+    }
+
+    // Clase auxiliar: reemplaza Pageable en la documentación generada.
+    // SpringDoc la convierte en query params: ?page=0&size=20&sort=...
+    public static class PageableDocHelper {
+        public Integer page = 0;
+        public Integer size = 20;
+        public String  sort = "fechaHoraRegistro,desc";
+    }
 
     @Bean
     public OpenAPI customOpenAPI() {
@@ -29,15 +55,14 @@ public class OpenApiConfig {
                         .version("1.0.0")
                         .description("""
                                 Sistema de Gestión Documental para Mesa de Partes Digital.
-                                Permite el registro, seguimiento y resolución de expedientes
-                                presentados por personas naturales y jurídicas.
-                                
+
                                 **Roles del sistema:**
                                 - `ADMINISTRADOR` — acceso total
                                 - `MESA_PARTES` — gestión de documentos y respuestas
                                 - `CIUDADANO` — gestión de su cuenta y expedientes propios
-                                
-                                **Autenticación:** Bearer JWT (obtenido en `/api/auth/login`)
+
+                                **Autenticación:** Bearer JWT.
+                                Obtén el token en `POST /api/auth/login` y pégalo en "Authorize".
                                 """)
                         .contact(new Contact()
                                 .name("Soporte SGD")
@@ -45,10 +70,10 @@ public class OpenApiConfig {
                         .license(new License()
                                 .name("Uso interno — todos los derechos reservados")))
                 .servers(List.of(
-                        new Server().url("http://localhost:8080").description("Desarrollo local"),
-                        new Server().url("https://api.mesapartes.gob.pe").description("Producción")
+                        new Server()
+                                .url("http://localhost:8080")
+                                .description("Desarrollo local")
                 ))
-                // Esquema de autenticación JWT
                 .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
                 .components(new Components()
                         .addSecuritySchemes("bearerAuth", new SecurityScheme()
@@ -56,6 +81,6 @@ public class OpenApiConfig {
                                 .type(SecurityScheme.Type.HTTP)
                                 .scheme("bearer")
                                 .bearerFormat("JWT")
-                                .description("Ingrese el token JWT obtenido en /api/auth/login")));
+                                .description("Token JWT obtenido en POST /api/auth/login")));
     }
 }
