@@ -1,0 +1,296 @@
+package com.mesapartes.sgd.service.impl;
+
+import com.mesapartes.sgd.service.EmailService;
+import com.mesapartes.sgd.exception.BadRequestException;
+import com.mesapartes.sgd.exception.BusinessException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.MailException;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.stereotype.Service;
+
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.regex.Pattern;
+
+@Service
+@RequiredArgsConstructor
+public class EmailServiceImpl implements EmailService {
+
+    protected static final Logger log = LoggerFactory.getLogger(EmailServiceImpl.class);
+
+    private static final Pattern EMAIL_PATTERN =
+            Pattern.compile("^[A-Za-z0-9+_.-]+@(.+)$");
+
+    private final JavaMailSender mailSender;
+
+    @Value("${mail.from}")
+    private String mailFrom;
+
+    // ===== CÓDIGO DE VERIFICACIÓN AL REGISTRARSE =====
+    @Override
+    public void enviarCodigoVerificacion(String destinatario, String nombreOEmpresa, String codigo) {
+
+        validarEmail(destinatario);
+        validarCampoObligatorio(codigo, "código de verificación");
+
+        String nombreSeguro = valorSeguro(nombreOEmpresa);
+
+        String asuntoEmail = "Activación de cuenta – Sistema de Mesa de Partes Digital";
+        String contenido = """
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
+                    <h2 style="color: #1a5276;">Mesa de Partes Virtual</h2>
+                    <p>Estimado/a <b>%s</b>,</p>
+                    <p>Su registro fue recibido. Para activar su cuenta ingrese el siguiente código:</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <span style="font-size: 36px; font-weight: bold; letter-spacing: 10px;
+                                     background: #eaf4fb; padding: 16px 32px; border-radius: 8px;
+                                     color: #1a5276;">%s</span>
+                    </div>
+                    <p style="color: #888;">Este código tiene una validez de <b>10 minutos</b>.</p>
+                    <p>Si no solicitó este registro, ignore este mensaje.</p>
+                    <hr>
+                    <p><i>Sistema de Gestión Documental – Mesa de Partes Digital</i></p>
+                </div>
+                """.formatted(nombreSeguro, codigo);
+
+        enviarEmail(destinatario, asuntoEmail, contenido);
+    }
+
+    // ===== CÓDIGO DE RECUPERACIÓN DE CONTRASEÑA =====
+    @Override
+    public void enviarCodigoRecuperacion(String destinatario, String nombreOEmpresa, String codigo) {
+
+        validarEmail(destinatario);
+        validarCampoObligatorio(codigo, "código de recuperación");
+
+        String nombreSeguro = valorSeguro(nombreOEmpresa);
+
+        String asuntoEmail = "Recuperación de contraseña – Sistema de Mesa de Partes Digital";
+        String contenido = """
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
+                    <h2 style="color: #922b21;">Mesa de Partes Virtual</h2>
+                    <p>Estimado/a <b>%s</b>,</p>
+                    <p>Recibimos una solicitud para restablecer la contraseña de su cuenta.</p>
+                    <p>Ingrese el siguiente código para continuar:</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <span style="font-size: 36px; font-weight: bold; letter-spacing: 10px;
+                                     background: #fdedec; padding: 16px 32px; border-radius: 8px;
+                                     color: #922b21;">%s</span>
+                    </div>
+                    <p style="color: #888;">Este código tiene una validez de <b>10 minutos</b>.</p>
+                    <p>Si no solicitó este cambio, ignore este mensaje. Su contraseña no será modificada.</p>
+                    <hr>
+                    <p><i>Sistema de Gestión Documental – Mesa de Partes Digital</i></p>
+                </div>
+                """.formatted(nombreSeguro, codigo);
+
+        enviarEmail(destinatario, asuntoEmail, contenido);
+    }
+
+    // ===== CONFIRMACIÓN DE REGISTRO DE DOCUMENTO =====
+    @Override
+    public void enviarConfirmacionRegistro(String destinatario, String numeroTramite,
+                                           String asunto, String remitente) {
+
+        validarEmail(destinatario);
+        validarCampoObligatorio(numeroTramite, "número de trámite");
+
+        String asuntoSeguro = valorSeguro(asunto);
+        String remitenteSeguro = valorSeguro(remitente);
+
+        String asuntoEmail = "Confirmación de registro - " + numeroTramite;
+
+        String contenido = """
+                <h2>Mesa de Partes Virtual</h2>
+                <p>Estimado/a <b>%s</b>,</p>
+                <p>Su documento ha sido registrado exitosamente.</p>
+                <br>
+                <table border="1" cellpadding="8">
+                    <tr><td><b>Número de Trámite</b></td><td>%s</td></tr>
+                    <tr><td><b>Asunto</b></td><td>%s</td></tr>
+                    <tr><td><b>Estado</b></td><td>RECIBIDO</td></tr>
+                </table>
+                <br>
+                <p>Puede usar su número de trámite para hacer seguimiento de su documento.</p>
+                <p><i>Sistema de Gestión Documental</i></p>
+                """.formatted(remitenteSeguro, numeroTramite, asuntoSeguro);
+
+        enviarEmail(destinatario, asuntoEmail, contenido);
+    }
+
+    // ===== CAMBIO DE ESTADO =====
+    @Override
+    public void enviarCambioEstado(String destinatario, String numeroTramite,
+                                   String nuevoEstado, String observacion) {
+
+        validarEmail(destinatario);
+        validarCampoObligatorio(numeroTramite, "número de trámite");
+        validarCampoObligatorio(nuevoEstado, "estado del trámite");
+
+        String observacionSegura = valorSeguro(observacion);
+
+        String asuntoEmail = "Actualización de estado - " + numeroTramite;
+
+        String contenido = """
+                <h2>Mesa de Partes Virtual</h2>
+                <p>Su documento ha sido actualizado.</p>
+                <br>
+                <table border="1" cellpadding="8">
+                    <tr><td><b>Número de Trámite</b></td><td>%s</td></tr>
+                    <tr><td><b>Nuevo Estado</b></td><td>%s</td></tr>
+                    <tr><td><b>Observación</b></td><td>%s</td></tr>
+                </table>
+                <br>
+                <p><i>Sistema de Gestión Documental</i></p>
+                """.formatted(numeroTramite, nuevoEstado, observacionSegura);
+
+        enviarEmail(destinatario, asuntoEmail, contenido);
+    }
+
+    // ===== RESPUESTA FORMAL =====
+    @Override
+    public void enviarRespuestaFormal(String destinatario, String numeroTramite,
+                                      String remitente, String contenido) {
+
+        validarEmail(destinatario);
+        validarCampoObligatorio(numeroTramite, "número de trámite");
+
+        String remitenteSeguro = valorSeguro(remitente);
+        String contenidoSeguro = valorSeguro(contenido);
+
+        String asuntoEmail = "Respuesta oficial - " + numeroTramite;
+
+        String cuerpo = """
+            <h2>Mesa de Partes Virtual</h2>
+            <p>Estimado/a <b>%s</b>,</p>
+            <p>Le informamos que su trámite <b>%s</b> ha recibido una respuesta oficial:</p>
+            <br>
+            <div style="border-left: 4px solid #007bff; padding-left: 16px;">
+                <p>%s</p>
+            </div>
+            <br>
+            <p><i>Sistema de Gestión Documental</i></p>
+            """.formatted(remitenteSeguro, numeroTramite, contenidoSeguro);
+
+        enviarEmail(destinatario, asuntoEmail, cuerpo);
+    }
+
+    // ===== CONFIRMACIÓN DE EXPEDIENTE REGISTRADO =====
+    @Override
+    public void enviarConfirmacionExpediente(String destinatario, String nombreRemitente,
+                                             String numeroTramite, String asunto,
+                                             String tipoDocumento, Integer numeroFolios) {
+
+        validarEmail(destinatario);
+        validarCampoObligatorio(numeroTramite, "número de expediente");
+
+        if (numeroFolios == null || numeroFolios < 0) {
+            throw new BadRequestException("El número de folios debe ser mayor o igual a 0");
+        }
+
+        String nombreSeguro = valorSeguro(nombreRemitente);
+        String asuntoSeguro = valorSeguro(asunto);
+        String tipoDocSeguro = valorSeguro(tipoDocumento);
+
+        String asuntoEmail = "Confirmación de recepción de expediente – " + numeroTramite;
+
+        String contenido = """
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto;">
+                    <h2 style="color: #1a5276;">Mesa de Partes Virtual</h2>
+                    <p>Estimado/a <b>%s</b>,</p>
+                    <p>Su documento ha sido recibido y registrado exitosamente en nuestro sistema.</p>
+                    <br>
+                    <table border="1" cellpadding="10" style="border-collapse: collapse; width: 100%%;">
+                        <tr style="background-color: #eaf4fb;">
+                            <td><b>N° de Expediente</b></td>
+                            <td><b>%s</b></td>
+                        </tr>
+                        <tr>
+                            <td><b>Tipo de Documento</b></td>
+                            <td>%s</td>
+                        </tr>
+                        <tr>
+                            <td><b>Asunto</b></td>
+                            <td>%s</td>
+                        </tr>
+                        <tr>
+                            <td><b>N° de Folios</b></td>
+                            <td>%d</td>
+                        </tr>
+                        <tr>
+                            <td><b>Estado</b></td>
+                            <td>RECIBIDO</td>
+                        </tr>
+                    </table>
+                    <br>
+                    <p>Guarde su número de expediente para realizar el seguimiento de su trámite.</p>
+                    <hr>
+                    <p><i>Sistema de Gestión Documental – Mesa de Partes Digital</i></p>
+                </div>
+                """.formatted(nombreSeguro, numeroTramite, tipoDocSeguro, asuntoSeguro, numeroFolios);
+
+        enviarEmail(destinatario, asuntoEmail, contenido);
+    }
+
+    // ===== MÉTODO INTERNO =====
+    private void enviarEmail(String destinatario, String asunto, String contenido) {
+
+        try {
+            MimeMessage mensaje = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mensaje, true, "UTF-8");
+
+            helper.setFrom(mailFrom);
+            helper.setTo(destinatario);
+            helper.setSubject(asunto);
+            helper.setText(contenido, true);
+
+            mailSender.send(mensaje);
+
+        } catch (MessagingException | MailException e) {
+
+            log.error("Error enviando correo a {} con asunto '{}'", destinatario, asunto, e);
+
+            throw new BusinessException(
+                    "No se pudo enviar el correo electrónico al destinatario: " + destinatario
+            );
+
+        } catch (Exception e) {
+
+            log.error("Error inesperado enviando correo a {}", destinatario, e);
+
+            throw new BusinessException(
+                    "Ocurrió un error inesperado al intentar enviar el correo electrónico"
+            );
+        }
+    }
+
+    // ===== MÉTODOS AUXILIARES =====
+
+    private void validarEmail(String email) {
+
+        if (email == null || email.isBlank()) {
+            throw new BadRequestException("El correo del destinatario es obligatorio");
+        }
+
+        if (!EMAIL_PATTERN.matcher(email).matches()) {
+            throw new BadRequestException("El correo electrónico tiene un formato inválido: " + email);
+        }
+    }
+
+    private void validarCampoObligatorio(String valor, String campo) {
+
+        if (valor == null || valor.isBlank()) {
+            throw new BadRequestException("El campo '" + campo + "' es obligatorio");
+        }
+    }
+
+    private String valorSeguro(String valor) {
+        return (valor == null || valor.isBlank()) ? "No especificado" : valor;
+    }
+}

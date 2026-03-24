@@ -1,0 +1,67 @@
+HELP.md
+
+# ===== ENTORNO Y SECRETOS =====
+.env
+.env.*
+.env.local
+.env.production
+.env.staging
+secrets/
+
+# ===== CREDENCIALES Y CERTIFICADOS =====
+*.key
+*.pem
+*.crt
+*.p12
+*.jks
+*.keystore
+
+# ===== CONFIGURACIONES LOCALES DE SPRING =====
+src/main/resources/application-local.properties
+src/main/resources/application-prod.properties
+src/main/resources/application-secret.properties
+
+# ===== BUILD Y COMPILACION =====
+target/
+build/
+!**/src/main/**/target/
+!**/src/test/**/target/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# ===== MAVEN =====
+.mvn/wrapper/maven-wrapper.jar
+
+# ===== STORAGE LOCAL =====
+gestor-documentos/
+
+# ===== IDEs =====
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### Eclipse / STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+# ===== SISTEMA OPERATIVO =====
+.DS_Store
+Thumbs.db
