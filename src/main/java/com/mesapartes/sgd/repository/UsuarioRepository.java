@@ -1,5 +1,6 @@
 package com.mesapartes.sgd.repository;
 
+import com.mesapartes.sgd.entity.RolUsuario;
 import com.mesapartes.sgd.entity.Usuario;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
@@ -12,4 +13,6 @@ public interface UsuarioRepository extends JpaRepository<Usuario, UUID> {
     Optional<Usuario> findByEmail(String email);
 
     boolean existsByEmail(String email);
+
+    boolean existsByRol(RolUsuario rol);
 }
